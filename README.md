@@ -14,6 +14,16 @@ It supports:
 - local caching for playlists, posters, and guide data
 - Windows installer output
 
+## Status Snapshot
+
+| Area | Status |
+| --- | --- |
+| Windows desktop app | Implemented |
+| Shared/core project | Planned |
+| Android app | Planned |
+| Raspberry Pi/Linux app | Planned |
+| GitHub repository | Private |
+
 ## Repository Intent
 
 This repository is meant to host multiple future platform versions of `PoePerfect Player` in one place.
