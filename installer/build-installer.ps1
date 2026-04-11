@@ -2,7 +2,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $root = Split-Path -Parent $PSScriptRoot
-$projectFile = Join-Path $root "APTV.csproj"
+$projectFile = Join-Path $root "src\PoePerfect.Player.Windows\PoePerfect.Player.Windows.csproj"
 $publishDir = Join-Path $root "publish\win-x64"
 $distDir = Join-Path $root "dist"
 $installerScript = Join-Path $PSScriptRoot "PoePerfectPlayer.iss"
@@ -57,7 +57,7 @@ if (Test-Path $x86VlcDir) {
     Remove-Item $x86VlcDir -Recurse -Force
 }
 
-Get-ChildItem $publishDir -Recurse -File -Include *.pdb,*.lib -ErrorAction SilentlyContinue |
+Get-ChildItem $publishDir -Recurse -File -Include *.pdb, *.lib -ErrorAction SilentlyContinue |
     Remove-Item -Force
 
 Get-ChildItem $publishDir -Directory | Where-Object {

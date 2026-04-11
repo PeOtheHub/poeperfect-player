@@ -1,6 +1,6 @@
 # PoePerfect Player
 
-`PoePerfect Player` is a Windows desktop IPTV/VOD player built with `.NET 8`, `WPF`, and `LibVLCSharp`.
+`PoePerfect Player` is a private cross-platform IPTV/VOD player project that currently starts with a Windows desktop app built on `.NET 8`, `WPF`, and `LibVLCSharp`.
 
 It supports:
 
@@ -14,45 +14,61 @@ It supports:
 - local caching for playlists, posters, and guide data
 - Windows installer output
 
+## Repository Intent
+
+This repository is meant to host multiple future platform versions of `PoePerfect Player` in one place.
+
+Current status:
+
+- Windows desktop app: implemented
+- shared/core project: planned
+- Android app: planned
+- Raspberry Pi/Linux app: planned
+
 ## Current Platform
 
-Right now this project targets **Windows only**.
+Right now the implemented app targets **Windows only**.
 
-Core app technology:
+Current app technology:
 
 - `.NET 8`
 - `WPF`
 - `LibVLCSharp.WPF`
 - `VideoLAN.LibVLC.Windows`
 
-## Project Layout
+## Repository Layout
 
-- [APTV.csproj](./APTV.csproj)
-- [MainWindow.xaml](./MainWindow.xaml)
-- [MainWindow.xaml.cs](./MainWindow.xaml.cs)
-- [Services](./Services)
-- [Models](./Models)
+- [PoePerfect.Player.sln](./PoePerfect.Player.sln)
+- [src](./src)
+- [src/PoePerfect.Player.Windows](./src/PoePerfect.Player.Windows)
 - [installer](./installer)
 - [docs](./docs)
 
+Planned structure:
+
+- `src/PoePerfect.Player.Windows`
+- `src/PoePerfect.Player.Core`
+- `src/PoePerfect.Player.Android`
+- `src/PoePerfect.Player.RaspberryPi`
+
 ## Run Locally
 
-From the project folder:
+From the repository root:
 
 ```powershell
-dotnet run
+dotnet run --project .\src\PoePerfect.Player.Windows\PoePerfect.Player.Windows.csproj
 ```
 
 Or start the built app directly:
 
 ```powershell
-C:\projectpeo\APTV\bin\Debug\net8.0-windows\PoePerfectPlayer.exe
+C:\projectpeo\APTV\src\PoePerfect.Player.Windows\bin\Debug\net8.0-windows\PoePerfectPlayer.exe
 ```
 
 ## Build
 
 ```powershell
-dotnet build
+dotnet build .\PoePerfect.Player.sln
 ```
 
 ## Installer
@@ -88,3 +104,10 @@ These are **not** meant to be committed to the repository.
 - The app is designed so end users enter their own playlist and optional XMLTV source.
 - Project history is documented in [poeperfect-player-history.md](./docs/poeperfect-player-history.md).
 - Licensing discussion notes are documented in [licensing-handoff.md](./docs/licensing-handoff.md).
+- Private repository/license notes are documented in [LICENSE.md](./LICENSE.md).
+
+## Suggested GitHub Settings
+
+- Repository name: `poeperfect-player`
+- Visibility: `Private`
+- Description: `Private cross-platform IPTV/VOD player project starting with the Windows desktop app.`
