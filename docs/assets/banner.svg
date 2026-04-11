@@ -1,0 +1,56 @@
+<svg width="1280" height="320" viewBox="0 0 1280 320" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1280" y2="320" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#07111F"/>
+      <stop offset="0.55" stop-color="#0B1830"/>
+      <stop offset="1" stop-color="#13264A"/>
+    </linearGradient>
+    <linearGradient id="accentA" x1="120" y1="60" x2="420" y2="260" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#54D3E2"/>
+      <stop offset="1" stop-color="#4D88E8"/>
+    </linearGradient>
+    <linearGradient id="accentB" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#FF7A59"/>
+      <stop offset="1" stop-color="#FFA31A"/>
+    </linearGradient>
+    <linearGradient id="accentC" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#A27BFF"/>
+      <stop offset="1" stop-color="#6BA7FF"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1280" height="320" rx="28" fill="url(#bg)"/>
+  <rect x="28" y="28" width="1224" height="264" rx="24" stroke="rgba(111,156,255,0.16)" fill="rgba(9,16,28,0.42)"/>
+
+  <circle cx="113" cy="83" r="6" fill="#4FD2DF"/>
+  <circle cx="137" cy="83" r="6" fill="#FF8A5B"/>
+  <circle cx="161" cy="83" r="6" fill="#8B91FF"/>
+
+  <text x="86" y="132" fill="#F5F7FF" font-size="52" font-family="Segoe UI, Arial, sans-serif" font-weight="700">
+    PoePerfect Player
+  </text>
+  <text x="88" y="170" fill="#98A6C3" font-size="22" font-family="Segoe UI, Arial, sans-serif">
+    Private cross-platform IPTV and VOD player project
+  </text>
+  <text x="88" y="203" fill="#6FD3FF" font-size="18" font-family="Segoe UI, Arial, sans-serif">
+    Windows first • Shared core planned • Android planned • Raspberry Pi/Linux planned
+  </text>
+
+  <rect x="88" y="230" width="142" height="42" rx="21" fill="url(#accentA)"/>
+  <text x="118" y="257" fill="#07111F" font-size="18" font-family="Segoe UI, Arial, sans-serif" font-weight="700">Windows</text>
+
+  <rect x="244" y="230" width="134" height="42" rx="21" fill="url(#accentB)"/>
+  <text x="281" y="257" fill="#07111F" font-size="18" font-family="Segoe UI, Arial, sans-serif" font-weight="700">Android</text>
+
+  <rect x="392" y="230" width="192" height="42" rx="21" fill="url(#accentC)"/>
+  <text x="433" y="257" fill="#07111F" font-size="18" font-family="Segoe UI, Arial, sans-serif" font-weight="700">Raspberry Pi</text>
+
+  <rect x="790" y="62" width="372" height="196" rx="24" fill="#0A1527" stroke="rgba(111,156,255,0.18)"/>
+  <rect x="820" y="92" width="132" height="132" rx="24" fill="url(#accentA)"/>
+  <rect x="966" y="92" width="166" height="62" rx="18" fill="url(#accentB)"/>
+  <rect x="966" y="162" width="166" height="62" rx="18" fill="url(#accentC)"/>
+  <rect x="846" y="118" width="80" height="80" rx="18" fill="none" stroke="white" stroke-width="6" opacity="0.92"/>
+  <text x="871" y="165" fill="white" font-size="24" font-family="Segoe UI, Arial, sans-serif" font-weight="700">TV</text>
+  <text x="1008" y="129" fill="#07111F" font-size="16" font-family="Segoe UI, Arial, sans-serif" font-weight="700">Film</text>
+  <text x="1001" y="199" fill="#07111F" font-size="16" font-family="Segoe UI, Arial, sans-serif" font-weight="700">Serier</text>
+</svg>
