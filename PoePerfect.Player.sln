@@ -1,9 +1,14 @@
-﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.0.31903.59
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PoePerfect.Player.Windows", "src\PoePerfect.Player.Windows\PoePerfect.Player.Windows.csproj", "{2E4BCD5C-A3CD-4002-BADC-A651207EE97E}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{09A8097E-FAC0-48EB-97EF-76E577D2EDCF}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PoePerfect.Player.Android", "src\PoePerfect.Player.Android\PoePerfect.Player.Android.csproj", "{FF0C29AE-0731-4E6A-9EA0-A2744B1FA404}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PoePerfect.Player.Core", "src\PoePerfect.Player.Core\PoePerfect.Player.Core.csproj", "{F7CF7DB5-F6CE-49AD-9D30-6F38839D716F}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -18,5 +23,17 @@ Global
 		{2E4BCD5C-A3CD-4002-BADC-A651207EE97E}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{2E4BCD5C-A3CD-4002-BADC-A651207EE97E}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{2E4BCD5C-A3CD-4002-BADC-A651207EE97E}.Release|Any CPU.Build.0 = Release|Any CPU
+		{FF0C29AE-0731-4E6A-9EA0-A2744B1FA404}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{FF0C29AE-0731-4E6A-9EA0-A2744B1FA404}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{FF0C29AE-0731-4E6A-9EA0-A2744B1FA404}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{FF0C29AE-0731-4E6A-9EA0-A2744B1FA404}.Release|Any CPU.Build.0 = Release|Any CPU
+		{F7CF7DB5-F6CE-49AD-9D30-6F38839D716F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{F7CF7DB5-F6CE-49AD-9D30-6F38839D716F}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{F7CF7DB5-F6CE-49AD-9D30-6F38839D716F}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{F7CF7DB5-F6CE-49AD-9D30-6F38839D716F}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{FF0C29AE-0731-4E6A-9EA0-A2744B1FA404} = {09A8097E-FAC0-48EB-97EF-76E577D2EDCF}
+		{F7CF7DB5-F6CE-49AD-9D30-6F38839D716F} = {09A8097E-FAC0-48EB-97EF-76E577D2EDCF}
 	EndGlobalSection
 EndGlobal

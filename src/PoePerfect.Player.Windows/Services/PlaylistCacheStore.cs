@@ -8,7 +8,7 @@ namespace APTV.Services;
 
 public sealed class PlaylistCacheStore
 {
-    private const int CurrentSchemaVersion = 2;
+    private const int CurrentSchemaVersion = 3;
     private static readonly AppLogger Logger = AppLogger.Instance;
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -124,6 +124,7 @@ public sealed class PlaylistCacheStore
             LogoUrl = channel.LogoUrl,
             TvgId = channel.TvgId,
             TvgName = channel.TvgName,
+            AddedAtUtc = channel.AddedAtUtc,
             MediaOptions = channel.MediaOptions.ToList(),
         };
     }
@@ -137,7 +138,8 @@ public sealed class PlaylistCacheStore
             cachedChannel.LogoUrl,
             cachedChannel.TvgId,
             cachedChannel.TvgName,
-            cachedChannel.MediaOptions);
+            cachedChannel.MediaOptions,
+            cachedChannel.AddedAtUtc);
     }
 
     public sealed record CachedPlaylist(IReadOnlyList<Channel> Channels, DateTimeOffset CachedAtUtc);
@@ -168,6 +170,8 @@ public sealed class PlaylistCacheStore
         public string? TvgId { get; set; }
 
         public string? TvgName { get; set; }
+
+        public DateTimeOffset? AddedAtUtc { get; set; }
 
         public List<string> MediaOptions { get; set; } = [];
     }

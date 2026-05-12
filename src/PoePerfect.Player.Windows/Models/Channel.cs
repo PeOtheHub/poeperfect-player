@@ -18,7 +18,8 @@ public sealed class Channel : INotifyPropertyChanged
         string? logoUrl,
         string? tvgId = null,
         string? tvgName = null,
-        IReadOnlyList<string>? mediaOptions = null)
+        IReadOnlyList<string>? mediaOptions = null,
+        DateTimeOffset? addedAtUtc = null)
     {
         Name = string.IsNullOrWhiteSpace(name) ? "Unnamed channel" : name.Trim();
         Url = url;
@@ -27,6 +28,7 @@ public sealed class Channel : INotifyPropertyChanged
         TvgId = string.IsNullOrWhiteSpace(tvgId) ? null : tvgId.Trim();
         TvgName = string.IsNullOrWhiteSpace(tvgName) ? null : tvgName.Trim();
         MediaOptions = mediaOptions?.Where(option => !string.IsNullOrWhiteSpace(option)).ToArray() ?? [];
+        AddedAtUtc = addedAtUtc;
         ContentType = DetectContentType(Name, Url, Group);
         CategoryName = NormalizeCategory(Group, ContentType);
     }
@@ -46,6 +48,8 @@ public sealed class Channel : INotifyPropertyChanged
     public string? TvgName { get; }
 
     public IReadOnlyList<string> MediaOptions { get; }
+
+    public DateTimeOffset? AddedAtUtc { get; }
 
     public ChannelContentType ContentType { get; }
 

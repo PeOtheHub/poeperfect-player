@@ -23,7 +23,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private const int TestChannelLimit = 100;
     private const int UiBatchSize = 200;
     private const int SearchDebounceMilliseconds = 300;
-    private const int LatestItemLimit = 12;
+    private const int LatestAddedCategoryLimit = 20;
+    private const int LatestItemLimit = LatestAddedCategoryLimit;
     private const int LoadUiRefreshIntervalMilliseconds = 500;
     private const int InitialVisibleChannelBatchSize = 48;
     private const int IncrementalVisibleChannelBatchSize = 24;
@@ -34,6 +35,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private const int AudioDefaultsMaxAttempts = 8;
     private static readonly TimeSpan AudioDefaultsRetryDelay = TimeSpan.FromMilliseconds(450);
     private const string FavoritesCategoryKey = "__special__:favorites";
+    private const string LatestAddedCategoryKey = "__special__:latest-added";
     private const string RecentCategoryKey = "__special__:recent";
     private const double IncrementalScrollLoadThreshold = 500d;
     private readonly AppSettingsStore _appSettingsStore = new();
@@ -79,6 +81,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private bool _isBrowserContentLoading;
     private bool _isSearchPanelVisible;
     private bool _isSearchResultsActive;
+    private bool _isLoadingSettings;
     private bool _isSeekInteractionActive;
     private bool _isSeriesAppending;
     private bool _isVisibleChannelListReady;
@@ -88,10 +91,12 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private RangeObservableCollection<SeriesGroupItem> _seriesGroups = [];
     private IReadOnlyList<PlaybackTrackOption> _audioTrackOptions = [];
     private IReadOnlyList<PlaybackTrackOption> _subtitleTrackOptions = [];
+    private readonly Dictionary<string, MovieDetailInfo> _movieDetailInfoCache = new(StringComparer.OrdinalIgnoreCase);
     private bool _loadFirstHundredOnly = true;
     private CancellationTokenSource? _loadPlaylistCancellationTokenSource;
     private CancellationTokenSource? _xmlTvRefreshCancellationTokenSource;
     private CancellationTokenSource? _posterLoadCancellationTokenSource;
+    private CancellationTokenSource? _movieDetailCancellationTokenSource;
     private string _loadProgressStage = string.Empty;
     private string _loadProgressText = string.Empty;
     private double _loadProgressValue;
@@ -106,6 +111,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private bool _showFullscreenChrome = true;
     private string _appliedSearchText = string.Empty;
     private bool _scrollChannelGridToTopOnAttach;
+    private bool _sortVodCategoriesByLatest;
     private IReadOnlyList<Channel> _selectedCategoryChannels = [];
     private IReadOnlyList<SeriesGroupItem> _selectedCategorySeriesGroups = [];
     private List<RecentPlaybackEntry> _recentPlaybackEntries = [];
@@ -114,6 +120,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private BrowseSectionOption? _selectedCategoryManagerSectionOption;
     private CategoryOption? _selectedCategoryOption;
     private Channel? _selectedChannel;
+    private Channel? _selectedMovieDetailChannel;
+    private MovieDetailInfo? _movieDetailInfo;
+    private MediaImageSource? _movieDetailPosterImageSource;
     private PlaybackTrackOption? _selectedAudioTrackOption;
     private PlaybackTrackOption? _selectedSubtitleTrackOption;
     private SeriesGroupItem? _selectedSeriesGroup;
@@ -122,6 +131,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private bool _suppressCategorySelectionChanged;
     private bool _suppressTrackSelectionChanged;
     private string _statusMessage = "Klistra in en M3U-link och klicka Ladda.";
+    private string _movieDetailStatusText = string.Empty;
+    private bool _isMovieDetailLoading;
     private int _suspendChannelCollectionNotifications;
     private long? _totalBytes;
     private int _visibleChannelCount;
@@ -350,7 +361,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             OnPropertyChanged(nameof(SearchPanelTitle));
             OnPropertyChanged(nameof(ShowChannelList));
             OnPropertyChanged(nameof(ShowLiveChannelList));
+            OnPropertyChanged(nameof(IsMovieSection));
             OnPropertyChanged(nameof(ShowPosterChannelGrid));
+            OnPropertyChanged(nameof(ShowMovieDetailView));
             OnPropertyChanged(nameof(ShowSeriesOverviewGrid));
             OnPropertyChanged(nameof(ShowSeriesDetailView));
             OnPropertyChanged(nameof(ShowChannelListPlaceholder));
@@ -361,7 +374,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             OnPropertyChanged(nameof(DashboardHintText));
             StatusMessage = value is null
                 ? "Välj Live, Film eller Serier för att fortsätta."
-                : $"Välj en kategori i {value.Label} för att hämta aktuell lista.";
+                : SelectedCategoryOption is null
+                    ? $"Välj en kategori i {value.Label} för att hämta aktuell lista."
+                    : $"Öppnar {SelectedCategoryOption.Label} i {value.Label}.";
             NotifyDiscoveryProperties();
         }
     }
@@ -384,7 +399,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             OnPropertyChanged(nameof(HasSelectedCategory));
             OnPropertyChanged(nameof(ShowChannelList));
             OnPropertyChanged(nameof(ShowLiveChannelList));
+            OnPropertyChanged(nameof(IsMovieSection));
             OnPropertyChanged(nameof(ShowPosterChannelGrid));
+            OnPropertyChanged(nameof(ShowMovieDetailView));
             OnPropertyChanged(nameof(ShowSeriesOverviewGrid));
             OnPropertyChanged(nameof(ShowSeriesDetailView));
             OnPropertyChanged(nameof(ShowChannelListPlaceholder));
@@ -537,6 +554,77 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
     }
 
+    public Channel? SelectedMovieDetailChannel
+    {
+        get => _selectedMovieDetailChannel;
+        private set
+        {
+            if (!SetProperty(ref _selectedMovieDetailChannel, value))
+            {
+                return;
+            }
+
+            NotifyMovieDetailProperties();
+            NotifyDiscoveryProperties();
+        }
+    }
+
+    public MovieDetailInfo? MovieDetailInfo
+    {
+        get => _movieDetailInfo;
+        private set
+        {
+            if (!SetProperty(ref _movieDetailInfo, value))
+            {
+                return;
+            }
+
+            NotifyMovieDetailProperties();
+        }
+    }
+
+    public MediaImageSource? MovieDetailPosterImageSource
+    {
+        get => _movieDetailPosterImageSource ?? SelectedMovieDetailChannel?.PosterImageSource;
+        private set
+        {
+            if (!SetProperty(ref _movieDetailPosterImageSource, value))
+            {
+                return;
+            }
+
+            OnPropertyChanged(nameof(MovieDetailPosterImageSource));
+        }
+    }
+
+    public bool IsMovieDetailLoading
+    {
+        get => _isMovieDetailLoading;
+        private set
+        {
+            if (!SetProperty(ref _isMovieDetailLoading, value))
+            {
+                return;
+            }
+
+            OnPropertyChanged(nameof(ShowMovieDetailStatus));
+        }
+    }
+
+    public string MovieDetailStatusText
+    {
+        get => _movieDetailStatusText;
+        private set
+        {
+            if (!SetProperty(ref _movieDetailStatusText, value))
+            {
+                return;
+            }
+
+            OnPropertyChanged(nameof(ShowMovieDetailStatus));
+        }
+    }
+
     public IReadOnlyList<PlaybackTrackOption> AudioTrackOptions
     {
         get => _audioTrackOptions;
@@ -618,8 +706,42 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         {
             if (SetProperty(ref _loadFirstHundredOnly, value))
             {
+                if (!_isLoadingSettings)
+                {
+                    _ = SaveCurrentSettingsAsync();
+                }
+            }
+        }
+    }
+
+    public bool SortVodCategoriesByLatest
+    {
+        get => _sortVodCategoriesByLatest;
+        set
+        {
+            if (!SetProperty(ref _sortVodCategoriesByLatest, value))
+            {
+                return;
+            }
+
+            if (!_isLoadingSettings)
+            {
                 _ = SaveCurrentSettingsAsync();
             }
+
+            OnPropertyChanged(nameof(CategorySortModeText));
+            OnPropertyChanged(nameof(CanSortSelectedCategoryByLatest));
+            OnPropertyChanged(nameof(ShowCategorySortControls));
+
+            if (!IsBusy && CanSortSelectedCategoryByLatest && SelectedCategoryOption is not null)
+            {
+                StatusMessage = value
+                    ? "Sorterar vald kategori med senaste först."
+                    : "Visar vald kategori i katalogordning.";
+                _ = LoadSelectedCategoryFromCacheAsync(SelectedCategoryOption, clearCurrentPlaybackSelection: false);
+            }
+
+            NotifyDiscoveryProperties();
         }
     }
 
@@ -814,6 +936,16 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     public bool CanBrowseCategories => HasSelectedBrowseSection && CategoryOptions.Count > 0;
 
+    public bool CanSortSelectedCategoryByLatest => CurrentSection is BrowseSection.Movies or BrowseSection.Series
+        && SelectedCategoryOption is not null
+        && !IsSpecialCategory(SelectedCategoryOption);
+
+    public bool ShowCategorySortControls => CanSortSelectedCategoryByLatest;
+
+    public string CategorySortModeText => SortVodCategoriesByLatest
+        ? "Senaste först"
+        : "Katalogordning";
+
     public bool ShowLatestSection => HasSelectedBrowseSection && HasLatestItems;
 
     public bool IsPlaylistEditorVisible
@@ -877,7 +1009,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
             OnPropertyChanged(nameof(ShowChannelList));
             OnPropertyChanged(nameof(ShowLiveChannelList));
+            OnPropertyChanged(nameof(IsMovieSection));
             OnPropertyChanged(nameof(ShowPosterChannelGrid));
+            OnPropertyChanged(nameof(ShowMovieDetailView));
             OnPropertyChanged(nameof(ShowSeriesOverviewGrid));
             OnPropertyChanged(nameof(ShowSeriesDetailView));
             OnPropertyChanged(nameof(ShowChannelListPlaceholder));
@@ -902,11 +1036,17 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     public bool ShowLiveChannelList => ShowChannelList && IsLiveSection;
 
+    public bool IsMovieSection => CurrentSection == BrowseSection.Movies;
+
     public bool IsSeriesSection => CurrentSection == BrowseSection.Series;
 
     public bool HasSelectedSeriesGroup => SelectedSeriesGroup is not null;
 
-    public bool ShowPosterChannelGrid => ShowChannelList && !IsLiveSection && !IsSeriesSection;
+    public bool HasSelectedMovieDetailChannel => SelectedMovieDetailChannel is not null;
+
+    public bool ShowPosterChannelGrid => ShowChannelList && IsMovieSection && !HasSelectedMovieDetailChannel;
+
+    public bool ShowMovieDetailView => ShowChannelList && IsMovieSection && HasSelectedMovieDetailChannel;
 
     public bool ShowSeriesOverviewGrid => ShowChannelList && IsSeriesSection && !HasSelectedSeriesGroup;
 
@@ -914,7 +1054,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     public IReadOnlyList<SeriesEpisodeItem> CurrentSeriesEpisodes => SelectedSeriesSeason?.Episodes ?? [];
 
-    public bool HasMoreVisibleChannels => IsSeriesSection && !HasSelectedSeriesGroup
+    public bool HasMoreVisibleChannels => HasSelectedMovieDetailChannel
+        ? false
+        : IsSeriesSection && !HasSelectedSeriesGroup
         ? _visibleSeriesGroupRenderCount < _selectedCategorySeriesGroups.Count
         : _visibleChannelRenderCount < _selectedCategoryChannels.Count;
 
@@ -1044,7 +1186,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         _ => "Senast tillagda",
     };
 
-    public string LatestSectionHint => "Baserat pa ordningen i spellistan.";
+    public string LatestSectionHint => "Baserat pa added-metadata nar den finns, annars ordningen i spellistan.";
 
     public string CategorySectionTitle => $"Kategorier i {GetCurrentSectionLabel()}";
 
@@ -1142,6 +1284,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 parts.Add("bara favoriter");
             }
 
+            if (CanSortSelectedCategoryByLatest && SortVodCategoriesByLatest)
+            {
+                parts.Add("senaste först");
+            }
+
             if (HasMoreVisibleChannels)
             {
                 parts.Add("fler laddas vid scroll");
@@ -1168,10 +1315,40 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
     }
 
+    public string MovieDetailTitle => MovieDetailInfo?.Title
+        ?? SelectedMovieDetailChannel?.Name
+        ?? "Välj film";
+
+    public string MovieDetailSubtitle => MovieDetailInfo?.MetadataText
+        ?? SelectedMovieDetailChannel?.CategoryName
+        ?? "Filmdetaljer";
+
+    public string MovieDetailDescription => MovieDetailInfo?.DescriptionText
+        ?? "Hämtar beskrivning...";
+
+    public string MovieDetailGenre => MovieDetailInfo?.GenreText ?? "Genre saknas";
+
+    public string MovieDetailCast => MovieDetailInfo?.CastText ?? "Cast saknas";
+
+    public string MovieDetailDirector => MovieDetailInfo?.DirectorText ?? "Regi saknas";
+
+    public string MovieDetailRating => MovieDetailInfo?.RatingText ?? "Betyg saknas";
+
+    public string MovieDetailDuration => MovieDetailInfo?.DurationText ?? "Längd saknas";
+
+    public string MovieDetailReleaseDate => MovieDetailInfo?.ReleaseDateText ?? "Premiär saknas";
+
+    public bool ShowMovieDetailStatus => IsMovieDetailLoading || !string.IsNullOrWhiteSpace(MovieDetailStatusText);
+
     public string CurrentBrowserSelectionText
     {
         get
         {
+            if (IsMovieSection && SelectedMovieDetailChannel is not null)
+            {
+                return SelectedMovieDetailChannel.Name;
+            }
+
             if (IsSeriesSection && SelectedSeriesGroup is not null)
             {
                 return SelectedSeriesSeason is null
@@ -1201,7 +1378,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             ? HasSelectedSeriesGroup
                 ? "Välj säsong och avsnitt för att starta uppspelning direkt i fullscreen. Escape tar dig tillbaka hit."
                 : "Välj en serie för att öppna säsonger och avsnitt."
-            : "Välj en titel i griden för att starta uppspelning direkt i fullscreen. Escape tar dig tillbaka hit.";
+            : HasSelectedMovieDetailChannel
+                ? "Välj Spela för att starta filmen i fullscreen."
+                : "Välj en titel i griden för att öppna filminfo.";
 
     public string PlaylistCategoryManagerHintText
     {
@@ -1269,20 +1448,30 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         _logger.Info("MainWindow_Loaded started.");
         _favoriteUrls = await _favoritesStore.LoadAsync();
         var settings = await _appSettingsStore.LoadAsync();
-        PlaylistSource = settings.PlaylistSource;
-        XmlTvSource = settings.XmlTvSource;
-        LoadFirstHundredOnly = settings.LoadFirstHundredOnly;
-        _favoriteSeasonKeys = new HashSet<string>(
-            settings.FavoriteSeasonKeys.Where(item => !string.IsNullOrWhiteSpace(item)),
-            StringComparer.OrdinalIgnoreCase);
-        _recentPlaybackEntries = settings.RecentPlaybackEntries
-            .Where(entry => entry.Section is BrowseSection.Live or BrowseSection.Movies or BrowseSection.Series)
-            .OrderByDescending(entry => entry.PlayedAtUtc)
-            .Take(RecentPlaybackLimit)
-            .ToList();
-        _categoryDisplayPreferences = settings.CategoryDisplayPreferences
-            .Where(preference => preference.Section is BrowseSection.Live or BrowseSection.Movies or BrowseSection.Series)
-            .ToList();
+        _isLoadingSettings = true;
+        try
+        {
+            PlaylistSource = settings.PlaylistSource;
+            XmlTvSource = settings.XmlTvSource;
+            LoadFirstHundredOnly = settings.LoadFirstHundredOnly;
+            SortVodCategoriesByLatest = settings.SortVodCategoriesByLatest;
+            _favoriteSeasonKeys = new HashSet<string>(
+                settings.FavoriteSeasonKeys.Where(item => !string.IsNullOrWhiteSpace(item)),
+                StringComparer.OrdinalIgnoreCase);
+            _recentPlaybackEntries = settings.RecentPlaybackEntries
+                .Where(entry => entry.Section is BrowseSection.Live or BrowseSection.Movies or BrowseSection.Series)
+                .OrderByDescending(entry => entry.PlayedAtUtc)
+                .Take(RecentPlaybackLimit)
+                .ToList();
+            _categoryDisplayPreferences = settings.CategoryDisplayPreferences
+                .Where(preference => preference.Section is BrowseSection.Live or BrowseSection.Movies or BrowseSection.Series)
+                .ToList();
+        }
+        finally
+        {
+            _isLoadingSettings = false;
+        }
+
         RebuildPlaylistCategoryItems();
         NotifyDiscoveryProperties();
         NotifyPlaybackProperties();
@@ -1323,6 +1512,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         _xmlTvRefreshCancellationTokenSource?.Dispose();
         _posterLoadCancellationTokenSource?.Cancel();
         _posterLoadCancellationTokenSource?.Dispose();
+        _movieDetailCancellationTokenSource?.Cancel();
+        _movieDetailCancellationTokenSource?.Dispose();
         Mouse.OverrideCursor = null;
         _mediaPlayer.Dispose();
         _libVlc.Dispose();
@@ -1568,6 +1759,212 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private void CloseCategoryManager_Click(object sender, RoutedEventArgs e)
     {
         IsCategoryManagerVisible = false;
+    }
+
+    private async void MovieGridListBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (sender is not ListBox listBox || listBox.SelectedItem is not Channel movie)
+        {
+            return;
+        }
+
+        if (Mouse.DirectlyOver is DependencyObject currentElement
+            && FindAncestor<CheckBox>(currentElement) is not null)
+        {
+            listBox.SelectedItem = null;
+            return;
+        }
+
+        listBox.SelectedItem = null;
+        await OpenMovieDetailAsync(movie);
+    }
+
+    private void MovieBack_Click(object sender, RoutedEventArgs e)
+    {
+        CloseMovieDetail();
+        StatusMessage = SelectedCategoryOption is null
+            ? "Välj en kategori för att visa filmer."
+            : $"Visar filmer i {SelectedCategoryOption.Label}.";
+        _scrollChannelGridToTopOnAttach = true;
+        ScrollChannelGridToTop();
+    }
+
+    private void MoviePlay_Click(object sender, RoutedEventArgs e)
+    {
+        if (SelectedMovieDetailChannel is not { } movie)
+        {
+            return;
+        }
+
+        SelectedChannel = movie;
+    }
+
+    private async void MovieFavoriteToggle_Click(object sender, RoutedEventArgs e)
+    {
+        e.Handled = true;
+
+        if (SelectedMovieDetailChannel is null)
+        {
+            return;
+        }
+
+        if (SelectedMovieDetailChannel.IsFavorite)
+        {
+            _favoriteUrls.Add(SelectedMovieDetailChannel.Url);
+        }
+        else
+        {
+            _favoriteUrls.Remove(SelectedMovieDetailChannel.Url);
+        }
+
+        await SaveFavoritesAsync();
+        RefreshDiscoveryData(resetCategorySelection: false);
+        RefreshChannelsView();
+        NotifyDiscoveryProperties();
+        NotifyMovieDetailProperties();
+    }
+
+    private async Task OpenMovieDetailAsync(Channel movie)
+    {
+        if (movie.ContentType != ChannelContentType.Movie)
+        {
+            SelectedChannel = movie;
+            return;
+        }
+
+        CancelMovieDetailLoad();
+        MovieDetailInfo = APTV.Models.MovieDetailInfo.FromChannel(movie);
+        MovieDetailPosterImageSource = movie.PosterImageSource;
+        SelectedMovieDetailChannel = movie;
+        MovieDetailStatusText = "Hämtar metadata från leverantören...";
+        IsMovieDetailLoading = true;
+        StatusMessage = $"Hämtar filminfo för {movie.Name}...";
+
+        var movieDetailCancellationTokenSource = new CancellationTokenSource();
+        _movieDetailCancellationTokenSource = movieDetailCancellationTokenSource;
+        var cancellationToken = movieDetailCancellationTokenSource.Token;
+
+        try
+        {
+            await EnsureMovieDetailPosterAsync(MovieDetailInfo, cancellationToken);
+
+            if (_movieDetailInfoCache.TryGetValue(movie.Url, out var cachedInfo))
+            {
+                MovieDetailInfo = cachedInfo;
+                await EnsureMovieDetailPosterAsync(cachedInfo, cancellationToken);
+                MovieDetailStatusText = string.Empty;
+                StatusMessage = $"Visar filminfo för {cachedInfo.Title}.";
+                return;
+            }
+
+            var movieInfo = await _xtreamApiService.TryLoadMovieInfoAsync(
+                PlaylistSource.Trim(),
+                movie,
+                _catalogChannels,
+                cancellationToken);
+
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var detailInfo = movieInfo is null
+                ? APTV.Models.MovieDetailInfo.FromChannel(movie)
+                : new MovieDetailInfo(
+                    movie,
+                    string.IsNullOrWhiteSpace(movieInfo.Title) ? movie.Name : movieInfo.Title,
+                    string.IsNullOrWhiteSpace(movieInfo.PosterUrl) ? movie.LogoUrl : movieInfo.PosterUrl,
+                    movieInfo.Plot,
+                    movieInfo.Genre,
+                    movieInfo.Cast,
+                    movieInfo.Director,
+                    movieInfo.Rating,
+                    movieInfo.Duration,
+                    movieInfo.ReleaseDate);
+
+            _movieDetailInfoCache[movie.Url] = detailInfo;
+            MovieDetailInfo = detailInfo;
+            await EnsureMovieDetailPosterAsync(detailInfo, cancellationToken);
+
+            MovieDetailStatusText = movieInfo is null
+                ? "Ingen extra metadata hittades från leverantören."
+                : string.Empty;
+            StatusMessage = $"Visar filminfo för {detailInfo.Title}.";
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            _logger.Warning($"Movie detail load failed. Movie={movie.Name}, Error={exception.Message}");
+            MovieDetailStatusText = "Kunde inte hämta extra metadata just nu.";
+            StatusMessage = $"Visar lokal filminfo för {movie.Name}.";
+        }
+        finally
+        {
+            if (ReferenceEquals(_movieDetailCancellationTokenSource, movieDetailCancellationTokenSource))
+            {
+                _movieDetailCancellationTokenSource = null;
+            }
+
+            movieDetailCancellationTokenSource.Dispose();
+            IsMovieDetailLoading = false;
+        }
+    }
+
+    private async Task EnsureMovieDetailPosterAsync(MovieDetailInfo? detailInfo, CancellationToken cancellationToken)
+    {
+        if (detailInfo is null)
+        {
+            return;
+        }
+
+        MediaImageSource? posterImage = null;
+        if (!string.IsNullOrWhiteSpace(detailInfo.PosterUrl))
+        {
+            posterImage = await _posterImageService.LoadAsync(detailInfo.PosterUrl, cancellationToken);
+        }
+
+        if (posterImage is null)
+        {
+            if (detailInfo.Channel.PosterImageSource is null)
+            {
+                await LoadPosterImageAsync(detailInfo.Channel, cancellationToken);
+            }
+
+            posterImage = detailInfo.Channel.PosterImageSource;
+        }
+
+        if (posterImage is null)
+        {
+            return;
+        }
+
+        await Dispatcher.InvokeAsync(
+            () =>
+            {
+                if (SelectedMovieDetailChannel is not null
+                    && string.Equals(SelectedMovieDetailChannel.Url, detailInfo.Channel.Url, StringComparison.OrdinalIgnoreCase))
+                {
+                    MovieDetailPosterImageSource = posterImage;
+                }
+            },
+            DispatcherPriority.Background,
+            cancellationToken);
+    }
+
+    private void CloseMovieDetail()
+    {
+        CancelMovieDetailLoad();
+        SelectedMovieDetailChannel = null;
+        MovieDetailInfo = null;
+        MovieDetailPosterImageSource = null;
+        MovieDetailStatusText = string.Empty;
+        IsMovieDetailLoading = false;
+    }
+
+    private void CancelMovieDetailLoad()
+    {
+        var cancellationTokenSource = _movieDetailCancellationTokenSource;
+        _movieDetailCancellationTokenSource = null;
+        cancellationTokenSource?.Cancel();
     }
 
     private async void SavePlaylistSettings_Click(object sender, RoutedEventArgs e)
@@ -1873,6 +2270,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private async void FavoriteToggle_Click(object sender, RoutedEventArgs e)
     {
+        e.Handled = true;
+
         var channel = sender switch
         {
             FrameworkElement { DataContext: Channel directChannel } => directChannel,
@@ -2398,6 +2797,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         _visibleSeriesGroupRenderCount = 0;
         _isAppendingVisibleChannels = false;
         _isSeriesAppending = false;
+        CloseMovieDetail();
         SelectedSeriesGroup = null;
         SeriesGroups = [];
 
@@ -2677,35 +3077,19 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     {
         try
         {
-            foreach (var channel in channels)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
+            var channelsNeedingPosters = channels
+                .Where(channel => channel.PosterImageSource is null)
+                .DistinctBy(channel => channel.Url)
+                .ToArray();
 
-                if (channel.PosterImageSource is not null)
+            await Parallel.ForEachAsync(
+                channelsNeedingPosters,
+                new ParallelOptions
                 {
-                    continue;
-                }
-
-                MediaImageSource? posterImage = null;
-                foreach (var imageSource in GetChannelImageSources(channel))
-                {
-                    posterImage = await _posterImageService.LoadAsync(imageSource, cancellationToken);
-                    if (posterImage is not null)
-                    {
-                        break;
-                    }
-                }
-
-                if (posterImage is null)
-                {
-                    continue;
-                }
-
-                await Dispatcher.InvokeAsync(
-                    () => channel.PosterImageSource = posterImage,
-                    DispatcherPriority.Background,
-                    cancellationToken);
-            }
+                    CancellationToken = cancellationToken,
+                    MaxDegreeOfParallelism = 6,
+                },
+                LoadPosterImageAsync);
         }
         catch (OperationCanceledException)
         {
@@ -2713,6 +3097,36 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         catch
         {
         }
+    }
+
+    private async ValueTask LoadPosterImageAsync(Channel channel, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        if (channel.PosterImageSource is not null)
+        {
+            return;
+        }
+
+        MediaImageSource? posterImage = null;
+        foreach (var imageSource in GetChannelImageSources(channel))
+        {
+            posterImage = await _posterImageService.LoadAsync(imageSource, cancellationToken);
+            if (posterImage is not null)
+            {
+                break;
+            }
+        }
+
+        if (posterImage is null)
+        {
+            return;
+        }
+
+        await Dispatcher.InvokeAsync(
+            () => channel.PosterImageSource = posterImage,
+            DispatcherPriority.Background,
+            cancellationToken);
     }
 
     private static IEnumerable<string> GetChannelImageSources(Channel channel)
@@ -2813,6 +3227,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 PlaylistSource = PlaylistSource.Trim(),
                 XmlTvSource = XmlTvSource.Trim(),
                 LoadFirstHundredOnly = LoadFirstHundredOnly,
+                SortVodCategoriesByLatest = SortVodCategoriesByLatest,
                 FavoriteSeasonKeys = _favoriteSeasonKeys
                     .OrderBy(item => item, StringComparer.OrdinalIgnoreCase)
                     .ToList(),
@@ -3094,7 +3509,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             StatusMessage = $"Bygger {selectedCategory.Label} frÅn lokal data...";
             await Dispatcher.Yield(DispatcherPriority.Render);
 
-            var selectedChannels = GetSelectedCategoryChannels();
+            var (selectedChannels, cacheStatusOverride) = await GetSelectedCategoryChannelsForCacheLoadAsync(selectedCategory);
             ApplyFavorites(selectedChannels);
 
             if (CurrentSection == BrowseSection.Series)
@@ -3116,9 +3531,13 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 _logger.Info($"Category cache load completed. Category={selectedCategory.Label}, Channels={selectedChannels.Count}");
             }
 
-            CacheStatusText = IsFavoritesCategory(selectedCategory)
-                ? "Cache: visar lokala favoriter ovanpå den sparade katalogen."
-                : "Cache: visar lokal spelhistorik ovanpå den sparade katalogen.";
+            CacheStatusText = !string.IsNullOrWhiteSpace(cacheStatusOverride)
+                ? cacheStatusOverride
+                : IsFavoritesCategory(selectedCategory)
+                    ? "Cache: visar lokala favoriter ovanpå den sparade katalogen."
+                    : IsLatestAddedCategory(selectedCategory)
+                        ? "Cache: visar senast tillagda från den sparade katalogen."
+                        : "Cache: visar lokal spelhistorik ovanpå den sparade katalogen.";
             IsLoadProgressVisible = false;
             IsVisibleChannelListReady = true;
             RefreshChannelsView();
@@ -3131,6 +3550,33 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         {
             IsBrowserContentLoading = false;
         }
+    }
+
+    private async Task<(IReadOnlyList<Channel> Channels, string? CacheStatusText)> GetSelectedCategoryChannelsForCacheLoadAsync(
+        CategoryOption selectedCategory)
+    {
+        if (CurrentSection == BrowseSection.Movies && IsLatestAddedCategory(selectedCategory))
+        {
+            var source = PlaylistSource.Trim();
+            var apiResult = await _xtreamApiService.TryLoadLatestAddedAsync(
+                source,
+                BrowseSection.Movies,
+                _catalogChannels,
+                LatestAddedCategoryLimit);
+
+            if (apiResult is { Channels.Count: > 0 })
+            {
+                var mergedChannels = MergeChannelsIntoCatalog(apiResult.Channels);
+                ApplyFavorites(mergedChannels);
+                SetCatalogChannels(mergedChannels);
+
+                return (
+                    apiResult.Channels,
+                    $"Cache: hämtade senast tillagda filmer direkt via {apiResult.ProviderName}.");
+            }
+        }
+
+        return (GetSelectedCategoryChannels(), null);
     }
 
     private async Task RefreshSelectedCategoryAsync(CategoryOption selectedCategory)
@@ -3368,7 +3814,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             return;
         }
 
-        var categories = GetCategoryOptionsForSection(CurrentSection!.Value, includeHidden: false);
+        var section = CurrentSection!.Value;
+        var categories = GetCategoryOptionsForSection(section, includeHidden: false);
 
         var previousKey = !resetSelection && SelectedCategoryOption is not null
             ? SelectedCategoryOption.Key
@@ -3377,28 +3824,44 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         CategoryOptions = new RangeObservableCollection<CategoryOption>(categories);
 
         var replacementSelection = previousKey is null
-            ? null
+            ? resetSelection
+                ? GetDefaultCategoryOption(section, categories)
+                : null
             : categories.FirstOrDefault(option => string.Equals(option.Key, previousKey, StringComparison.OrdinalIgnoreCase));
 
         if (!Equals(SelectedCategoryOption, replacementSelection))
         {
-            _suppressCategorySelectionChanged = true;
-            SelectedCategoryOption = replacementSelection;
-            _suppressCategorySelectionChanged = false;
+            if (resetSelection && replacementSelection is not null)
+            {
+                SelectedCategoryOption = replacementSelection;
+            }
+            else
+            {
+                _suppressCategorySelectionChanged = true;
+                SelectedCategoryOption = replacementSelection;
+                _suppressCategorySelectionChanged = false;
+            }
         }
     }
 
     private void RefreshLatestItems()
     {
-        if (!HasSelectedBrowseSection)
+        if (CurrentSection is not BrowseSection section)
         {
             LatestItems = [];
             return;
         }
 
-        var latest = GetChannelsForCurrentSection()
-            .Take(LatestItemLimit)
-            .ToList();
+        var latest = section == BrowseSection.Series
+            ? GetLatestAddedSeriesChannelGroups(_catalogChannels)
+                .Select(group => group.FirstOrDefault())
+                .Where(channel => channel is not null)
+                .Select(channel => channel!)
+                .Take(LatestItemLimit)
+                .ToList()
+            : GetLatestAddedChannelsForSection(section, _catalogChannels)
+                .Take(LatestItemLimit)
+                .ToList();
 
         LatestItems = new RangeObservableCollection<Channel>(latest);
     }
@@ -3576,10 +4039,19 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             return GetRecentChannelsForSection(section, sourceChannels);
         }
 
-        return sourceChannels
+        if (IsLatestAddedCategory(category))
+        {
+            return GetLatestAddedChannelsForSection(section, sourceChannels);
+        }
+
+        var selectedChannels = sourceChannels
             .Where(channel => MatchesSection(channel, section)
                 && string.Equals(channel.CategoryName, category.Key, StringComparison.OrdinalIgnoreCase))
             .ToList();
+
+        return SortVodCategoriesByLatest && section is BrowseSection.Movies or BrowseSection.Series
+            ? SortChannelsByLatestAdded(section, selectedChannels)
+            : selectedChannels;
     }
 
     private List<CategoryOption> BuildSpecialCategoryOptions(BrowseSection section)
@@ -3587,10 +4059,15 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         var favoritesCount = section == BrowseSection.Series
             ? _seriesCatalogService.BuildGroups(GetFavoriteChannelsForSection(section, _catalogChannels)).Count
             : GetFavoriteChannelsForSection(section, _catalogChannels).Count;
-        var specialCategories = new List<CategoryOption>
+        var specialCategories = new List<CategoryOption>();
+
+        if (section != BrowseSection.Live)
         {
-            new(FavoritesCategoryKey, "Favoriter", favoritesCount),
-        };
+            var latestAddedCount = GetLatestAddedItemCountForSection(section, _catalogChannels);
+            specialCategories.Add(new CategoryOption(LatestAddedCategoryKey, "Senast tillagda", latestAddedCount));
+        }
+
+        specialCategories.Add(new CategoryOption(FavoritesCategoryKey, "Favoriter", favoritesCount));
 
         if (section != BrowseSection.Live)
         {
@@ -3602,6 +4079,13 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
 
         return specialCategories;
+    }
+
+    private static CategoryOption? GetDefaultCategoryOption(BrowseSection section, IReadOnlyList<CategoryOption> categories)
+    {
+        return section is BrowseSection.Movies or BrowseSection.Series
+            ? categories.FirstOrDefault(IsLatestAddedCategory)
+            : null;
     }
 
     private IReadOnlyList<Channel> GetFavoriteChannelsForSection(BrowseSection section, IReadOnlyList<Channel> sourceChannels)
@@ -3640,10 +4124,93 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             .ToList();
     }
 
+    private int GetLatestAddedItemCountForSection(BrowseSection section, IReadOnlyList<Channel> sourceChannels)
+    {
+        if (section == BrowseSection.Series)
+        {
+            return GetLatestAddedSeriesChannelGroups(sourceChannels).Count;
+        }
+
+        return Math.Min(
+            LatestAddedCategoryLimit,
+            sourceChannels.Count(channel => MatchesSection(channel, section)));
+    }
+
+    private IReadOnlyList<Channel> GetLatestAddedChannelsForSection(
+        BrowseSection section,
+        IReadOnlyList<Channel> sourceChannels)
+    {
+        if (section == BrowseSection.Series)
+        {
+            return GetLatestAddedSeriesChannelGroups(sourceChannels)
+                .SelectMany(group => group)
+                .ToList();
+        }
+
+        return SortChannelsByLatestAdded(
+            section,
+            sourceChannels.Where(channel => MatchesSection(channel, section)))
+            .Take(LatestAddedCategoryLimit)
+            .ToList();
+    }
+
+    private IReadOnlyList<Channel> SortChannelsByLatestAdded(
+        BrowseSection section,
+        IEnumerable<Channel> sourceChannels)
+    {
+        if (section == BrowseSection.Series)
+        {
+            return GetLatestAddedSeriesChannelGroups(sourceChannels, limit: null)
+                .SelectMany(group => group)
+                .ToList();
+        }
+
+        return sourceChannels
+            .Where(channel => MatchesSection(channel, section))
+            .Select((channel, index) => new { Channel = channel, Index = index })
+            .OrderByDescending(item => item.Channel.AddedAtUtc.HasValue)
+            .ThenByDescending(item => item.Channel.AddedAtUtc)
+            .ThenBy(item => item.Index)
+            .Select(item => item.Channel)
+            .ToList();
+    }
+
+    private List<IReadOnlyList<Channel>> GetLatestAddedSeriesChannelGroups(
+        IEnumerable<Channel> sourceChannels,
+        int? limit = LatestAddedCategoryLimit)
+    {
+        var groups = sourceChannels
+            .Select((channel, index) => new { Channel = channel, Index = index })
+            .Where(item => MatchesSection(item.Channel, BrowseSection.Series))
+            .GroupBy(item => _seriesCatalogService.GetSeriesKey(item.Channel), StringComparer.OrdinalIgnoreCase)
+            .Select(group => new
+            {
+                HasAddedAtUtc = group.Any(item => item.Channel.AddedAtUtc.HasValue),
+                AddedAtUtc = group.Max(item => item.Channel.AddedAtUtc),
+                FirstIndex = group.Min(item => item.Index),
+                Channels = group
+                    .OrderBy(item => item.Index)
+                    .Select(item => item.Channel)
+                    .ToList(),
+            })
+            .OrderByDescending(group => group.HasAddedAtUtc)
+            .ThenByDescending(group => group.AddedAtUtc)
+            .ThenBy(group => group.FirstIndex);
+
+        var limitedGroups = limit is null
+            ? groups
+            : groups.Take(limit.Value);
+
+        return limitedGroups
+            .Select(group => (IReadOnlyList<Channel>)group.Channels)
+            .ToList();
+    }
+
     private static bool IsSpecialCategory(CategoryOption? category)
     {
         return category is not null
             && (string.Equals(category.Key, FavoritesCategoryKey, StringComparison.Ordinal)
+                || string.Equals(category.Key, LatestAddedCategoryKey, StringComparison.Ordinal)
                 || string.Equals(category.Key, RecentCategoryKey, StringComparison.Ordinal));
     }
 
@@ -3657,6 +4224,12 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     {
         return category is not null
             && string.Equals(category.Key, RecentCategoryKey, StringComparison.Ordinal);
+    }
+
+    private static bool IsLatestAddedCategory(CategoryOption? category)
+    {
+        return category is not null
+            && string.Equals(category.Key, LatestAddedCategoryKey, StringComparison.Ordinal);
     }
 
     private List<CategoryOption> ApplyCategoryDisplayPreferences(
@@ -3884,6 +4457,39 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         return mergedChannels;
     }
 
+    private IReadOnlyList<Channel> MergeChannelsIntoCatalog(IReadOnlyList<Channel> updatedChannels)
+    {
+        if (updatedChannels.Count == 0)
+        {
+            return _catalogChannels;
+        }
+
+        var replacementsByUrl = updatedChannels
+            .Where(channel => !string.IsNullOrWhiteSpace(channel.Url))
+            .GroupBy(channel => channel.Url, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(
+                group => group.Key,
+                group => group.First(),
+                StringComparer.OrdinalIgnoreCase);
+        var replacedUrls = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var mergedChannels = new List<Channel>(_catalogChannels.Count + updatedChannels.Count);
+
+        foreach (var channel in _catalogChannels)
+        {
+            if (replacementsByUrl.TryGetValue(channel.Url, out var replacement))
+            {
+                mergedChannels.Add(replacement);
+                replacedUrls.Add(channel.Url);
+                continue;
+            }
+
+            mergedChannels.Add(channel);
+        }
+
+        mergedChannels.AddRange(updatedChannels.Where(channel => !replacedUrls.Contains(channel.Url)));
+        return mergedChannels;
+    }
+
     private static bool PlaylistLooksUnchanged(IReadOnlyList<Channel> current, IReadOnlyList<Channel> updated)
     {
         if (ReferenceEquals(current, updated))
@@ -3907,6 +4513,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 || !string.Equals(left.LogoUrl, right.LogoUrl, StringComparison.Ordinal)
                 || !string.Equals(left.TvgId, right.TvgId, StringComparison.Ordinal)
                 || !string.Equals(left.TvgName, right.TvgName, StringComparison.Ordinal)
+                || left.AddedAtUtc != right.AddedAtUtc
                 || left.MediaOptions.Count != right.MediaOptions.Count)
             {
                 return false;
@@ -4426,6 +5033,43 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         return null;
     }
 
+    private static T? FindAncestor<T>(DependencyObject? current)
+        where T : DependencyObject
+    {
+        while (current is not null)
+        {
+            if (current is T typedCurrent)
+            {
+                return typedCurrent;
+            }
+
+            current = System.Windows.Media.VisualTreeHelper.GetParent(current);
+        }
+
+        return null;
+    }
+
+    private void NotifyMovieDetailProperties()
+    {
+        OnPropertyChanged(nameof(HasSelectedMovieDetailChannel));
+        OnPropertyChanged(nameof(ShowPosterChannelGrid));
+        OnPropertyChanged(nameof(ShowMovieDetailView));
+        OnPropertyChanged(nameof(MovieDetailPosterImageSource));
+        OnPropertyChanged(nameof(MovieDetailTitle));
+        OnPropertyChanged(nameof(MovieDetailSubtitle));
+        OnPropertyChanged(nameof(MovieDetailDescription));
+        OnPropertyChanged(nameof(MovieDetailGenre));
+        OnPropertyChanged(nameof(MovieDetailCast));
+        OnPropertyChanged(nameof(MovieDetailDirector));
+        OnPropertyChanged(nameof(MovieDetailRating));
+        OnPropertyChanged(nameof(MovieDetailDuration));
+        OnPropertyChanged(nameof(MovieDetailReleaseDate));
+        OnPropertyChanged(nameof(ShowMovieDetailStatus));
+        OnPropertyChanged(nameof(CurrentBrowserSelectionText));
+        OnPropertyChanged(nameof(ChannelSelectionHintText));
+        OnPropertyChanged(nameof(HasMoreVisibleChannels));
+    }
+
     private void NotifyDiscoveryProperties()
     {
         OnPropertyChanged(nameof(CurrentSectionSummary));
@@ -4446,9 +5090,13 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         OnPropertyChanged(nameof(HasSelectedCategory));
         OnPropertyChanged(nameof(HasSelectedSeriesGroup));
         OnPropertyChanged(nameof(CanBrowseCategories));
+        OnPropertyChanged(nameof(CanSortSelectedCategoryByLatest));
+        OnPropertyChanged(nameof(ShowCategorySortControls));
+        OnPropertyChanged(nameof(CategorySortModeText));
         OnPropertyChanged(nameof(CanSearchCurrentSection));
         OnPropertyChanged(nameof(SearchPanelTitle));
         OnPropertyChanged(nameof(IsLiveSection));
+        OnPropertyChanged(nameof(IsMovieSection));
         OnPropertyChanged(nameof(IsSeriesSection));
         OnPropertyChanged(nameof(ShowDashboard));
         OnPropertyChanged(nameof(ShowBrowserShell));
@@ -4456,7 +5104,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         OnPropertyChanged(nameof(ShowLatestSection));
         OnPropertyChanged(nameof(ShowChannelList));
         OnPropertyChanged(nameof(ShowLiveChannelList));
+        OnPropertyChanged(nameof(HasSelectedMovieDetailChannel));
         OnPropertyChanged(nameof(ShowPosterChannelGrid));
+        OnPropertyChanged(nameof(ShowMovieDetailView));
         OnPropertyChanged(nameof(ShowSeriesOverviewGrid));
         OnPropertyChanged(nameof(ShowSeriesDetailView));
         OnPropertyChanged(nameof(ShowChannelListPlaceholder));
@@ -4468,6 +5118,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         OnPropertyChanged(nameof(ChannelCountText));
         OnPropertyChanged(nameof(SeriesDetailTitle));
         OnPropertyChanged(nameof(SeriesDetailSubtitle));
+        OnPropertyChanged(nameof(MovieDetailTitle));
+        OnPropertyChanged(nameof(MovieDetailSubtitle));
         OnPropertyChanged(nameof(CurrentSeriesEpisodes));
         OnPropertyChanged(nameof(CurrentBrowserSelectionText));
     }

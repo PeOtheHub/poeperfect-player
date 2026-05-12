@@ -1,0 +1,883 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:local="clr-namespace:PoePerfect.Player.Android"
+             xmlns:models="clr-namespace:PoePerfect.Player.Core.Models;assembly=PoePerfect.Player.Core"
+             xmlns:toolkit="http://schemas.microsoft.com/dotnet/2022/maui/toolkit"
+             x:Class="PoePerfect.Player.Android.MainPage"
+             x:DataType="local:MainPage"
+             Title="PoePerfect Player"
+             NavigationPage.HasNavigationBar="False"
+             Shell.NavBarIsVisible="False"
+             BackgroundColor="#020617">
+
+    <Grid Padding="16"
+          RowDefinitions="Auto,*"
+          RowSpacing="12">
+        <Border Grid.Row="0"
+                Padding="14,12"
+                BackgroundColor="#091223"
+                Stroke="#182A45"
+                StrokeShape="RoundRectangle 18">
+            <Grid ColumnDefinitions="Auto,*,Auto"
+                  ColumnSpacing="12">
+                <Button Text="Hem"
+                        Clicked="OnBackToDashboardClicked"
+                        IsVisible="{Binding ShowBrowserShell}"
+                        BackgroundColor="#0F172A"
+                        BorderColor="#334155"
+                        BorderWidth="1"
+                        TextColor="#E2E8F0" />
+
+                <VerticalStackLayout Grid.Column="1"
+                                     Spacing="2">
+                    <Label Text="{Binding HeaderTitle}"
+                           FontSize="20"
+                           FontAttributes="Bold"
+                           TextColor="#F8FAFC" />
+                    <Label Text="{Binding HeaderSubtitle}"
+                           FontSize="12"
+                           TextColor="#8EA3BF" />
+                </VerticalStackLayout>
+
+                <Button Grid.Column="2"
+                        Text="Playlists"
+                        Clicked="OnOpenPlaylistEditorClicked"
+                        BackgroundColor="#0F172A"
+                        BorderColor="#334155"
+                        BorderWidth="1"
+                        TextColor="#E2E8F0" />
+            </Grid>
+        </Border>
+
+        <Grid Grid.Row="1">
+            <Grid IsVisible="{Binding ShowDashboard}"
+                  RowDefinitions="Auto,*,Auto,Auto"
+                  RowSpacing="14">
+                <VerticalStackLayout Grid.Row="0"
+                                     Spacing="4">
+                    <Label Text="Start"
+                           FontSize="12"
+                           TextColor="#64748B" />
+                    <Label Text="{Binding DashboardHintText}"
+                           FontSize="14"
+                           TextColor="#E2E8F0" />
+                </VerticalStackLayout>
+
+                <Border x:Name="DashboardPlaylistEditor"
+                        IsVisible="False" />
+
+                <ScrollView Grid.Row="1">
+                    <VerticalStackLayout Spacing="14">
+                        <Grid>
+                            <Border Padding="22"
+                                    StrokeShape="RoundRectangle 26">
+                                <Border.Background>
+                                    <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                                        <GradientStop Color="#72E4E6" Offset="0" />
+                                        <GradientStop Color="#4E87D9" Offset="1" />
+                                    </LinearGradientBrush>
+                                </Border.Background>
+                                <VerticalStackLayout Spacing="12">
+                                    <Border Padding="10,4"
+                                            HorizontalOptions="Start"
+                                            BackgroundColor="#16040B16"
+                                            Stroke="#52FFFFFF"
+                                            StrokeShape="RoundRectangle 999">
+                                        <Label Text="Direkt och kanaler"
+                                               FontSize="10"
+                                               FontAttributes="Bold"
+                                               TextColor="#E0F2FE" />
+                                    </Border>
+                                    <Label Text="Live"
+                                           FontSize="30"
+                                           FontAttributes="Bold"
+                                           TextColor="White" />
+                                    <Label Text="{Binding LiveCardSummary}"
+                                           FontSize="13"
+                                           TextColor="#E0F2FE" />
+                                </VerticalStackLayout>
+                            </Border>
+
+                            <Button Text=""
+                                    Clicked="OnSectionCardClicked"
+                                    CommandParameter="Live"
+                                    BackgroundColor="Transparent"
+                                    BorderWidth="0"
+                                    Opacity="0.01"
+                                    Padding="0" />
+                        </Grid>
+
+                        <Grid>
+                            <Border Padding="22"
+                                    StrokeShape="RoundRectangle 26">
+                                <Border.Background>
+                                    <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                                        <GradientStop Color="#F87171" Offset="0" />
+                                        <GradientStop Color="#F59E0B" Offset="1" />
+                                    </LinearGradientBrush>
+                                </Border.Background>
+                                <VerticalStackLayout Spacing="12">
+                                    <Border Padding="10,4"
+                                            HorizontalOptions="Start"
+                                            BackgroundColor="#160B0500"
+                                            Stroke="#52FFFFFF"
+                                            StrokeShape="RoundRectangle 999">
+                                        <Label Text="Filmer och premiärer"
+                                               FontSize="10"
+                                               FontAttributes="Bold"
+                                               TextColor="#FFEDD5" />
+                                    </Border>
+                                    <Label Text="Film"
+                                           FontSize="30"
+                                           FontAttributes="Bold"
+                                           TextColor="White" />
+                                    <Label Text="{Binding MoviesCardSummary}"
+                                           FontSize="13"
+                                           TextColor="#FFEDD5" />
+                                </VerticalStackLayout>
+                            </Border>
+
+                            <Button Text=""
+                                    Clicked="OnSectionCardClicked"
+                                    CommandParameter="Movies"
+                                    BackgroundColor="Transparent"
+                                    BorderWidth="0"
+                                    Opacity="0.01"
+                                    Padding="0" />
+                        </Grid>
+
+                        <Grid>
+                            <Border Padding="22"
+                                    StrokeShape="RoundRectangle 26">
+                                <Border.Background>
+                                    <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                                        <GradientStop Color="#A78BFA" Offset="0" />
+                                        <GradientStop Color="#67B7F8" Offset="1" />
+                                    </LinearGradientBrush>
+                                </Border.Background>
+                                <VerticalStackLayout Spacing="12">
+                                    <Border Padding="10,4"
+                                            HorizontalOptions="Start"
+                                            BackgroundColor="#16040B16"
+                                            Stroke="#52FFFFFF"
+                                            StrokeShape="RoundRectangle 999">
+                                        <Label Text="Säsonger och avsnitt"
+                                               FontSize="10"
+                                               FontAttributes="Bold"
+                                               TextColor="#EDE9FE" />
+                                    </Border>
+                                    <Label Text="Serier"
+                                           FontSize="30"
+                                           FontAttributes="Bold"
+                                           TextColor="White" />
+                                    <Label Text="{Binding SeriesCardSummary}"
+                                           FontSize="13"
+                                           TextColor="#F5F3FF" />
+                                </VerticalStackLayout>
+                            </Border>
+
+                            <Button Text=""
+                                    Clicked="OnSectionCardClicked"
+                                    CommandParameter="Series"
+                                    BackgroundColor="Transparent"
+                                    BorderWidth="0"
+                                    Opacity="0.01"
+                                    Padding="0" />
+                        </Grid>
+                    </VerticalStackLayout>
+                </ScrollView>
+
+                <VerticalStackLayout Grid.Row="2"
+                                     Spacing="8"
+                                     HorizontalOptions="Center"
+                                     IsVisible="{Binding IsBusyLoading}">
+                    <ActivityIndicator IsVisible="{Binding IsBusyLoading}"
+                                       IsRunning="{Binding IsBusyLoading}"
+                                       Color="#38BDF8"
+                                       HeightRequest="42" />
+                    <Label Text="{Binding StatusText}"
+                           HorizontalTextAlignment="Center"
+                           TextColor="#CBD5E1" />
+                </VerticalStackLayout>
+
+                <Grid Grid.Row="3"
+                      ColumnDefinitions="*,12,*"
+                      ColumnSpacing="0">
+                    <Border Grid.Column="0"
+                            Padding="14"
+                            BackgroundColor="#04070C"
+                            Stroke="#1E293B"
+                            StrokeShape="RoundRectangle 16">
+                        <VerticalStackLayout Spacing="6">
+                            <Label Text="Playlist"
+                                   FontSize="11"
+                                   TextColor="#64748B" />
+                            <Label Text="{Binding PlaylistCardText}"
+                                   FontSize="13"
+                                   FontAttributes="Bold"
+                                   TextColor="#E2E8F0" />
+                        </VerticalStackLayout>
+                    </Border>
+
+                    <Border Grid.Column="2"
+                            Padding="14"
+                            BackgroundColor="#04070C"
+                            Stroke="#1E293B"
+                            StrokeShape="RoundRectangle 16">
+                        <VerticalStackLayout Spacing="6">
+                            <Label Text="Status"
+                                   FontSize="11"
+                                   TextColor="#64748B" />
+                            <Label Text="{Binding StatusText}"
+                                   FontSize="12"
+                                   TextColor="#38BDF8" />
+                        </VerticalStackLayout>
+                    </Border>
+                </Grid>
+            </Grid>
+
+            <Grid IsVisible="{Binding ShowBrowserShell}"
+                  RowDefinitions="Auto,Auto,Auto,Auto,Auto,*"
+                  RowSpacing="12">
+                <Border x:Name="BrowserPlaylistEditor"
+                        Grid.Row="0"
+                        IsVisible="False"
+                        Padding="14"
+                        BackgroundColor="#091223"
+                        Stroke="#182A45"
+                        StrokeShape="RoundRectangle 18">
+                    <VerticalStackLayout Spacing="10">
+                        <Label Text="Playlist-länk"
+                               FontAttributes="Bold"
+                               TextColor="#E2E8F0" />
+                        <Entry Placeholder="Klistra in M3U-länk"
+                               Text="{Binding PlaylistSource}"
+                               ClearButtonVisibility="WhileEditing"
+                               Keyboard="Url"
+                               TextColor="#E2E8F0"
+                               PlaceholderColor="#64748B"
+                               BackgroundColor="#0F172A" />
+                        <HorizontalStackLayout Spacing="10">
+                            <Button Text="Ladda spellista"
+                                    Clicked="OnLoadPlaylistClicked"
+                                    BackgroundColor="#0EA5E9"
+                                    TextColor="White"
+                                    HorizontalOptions="Fill" />
+                            <Button Text="Stäng"
+                                    Clicked="OnClosePlaylistEditorClicked"
+                                    BackgroundColor="#1E293B"
+                                    TextColor="#E2E8F0" />
+                        </HorizontalStackLayout>
+                    </VerticalStackLayout>
+                </Border>
+
+                <Border Grid.Row="1"
+                        Padding="14"
+                        BackgroundColor="#091223"
+                        Stroke="#182A45"
+                        StrokeShape="RoundRectangle 18">
+                    <VerticalStackLayout Spacing="10">
+                        <SearchBar Placeholder="Sök i vald sektion"
+                                   Text="{Binding SearchText}"
+                                   TextChanged="OnSearchTextChanged"
+                                   BackgroundColor="#0F172A"
+                                   TextColor="#E2E8F0"
+                                   PlaceholderColor="#64748B" />
+
+                        <Grid ColumnDefinitions="*,Auto,Auto"
+                              ColumnSpacing="10">
+                            <Label Text="{Binding BrowseHintText}"
+                                   TextColor="#8EA3BF"
+                                   VerticalOptions="Center" />
+                            <Button Grid.Column="1"
+                                    Text="{Binding CategoryManagerButtonText}"
+                                    Clicked="OnToggleCategoryManagerClicked"
+                                    BackgroundColor="#0F172A"
+                                    BorderColor="#334155"
+                                    BorderWidth="1"
+                                    TextColor="#E2E8F0"
+                                    Padding="12,6" />
+                            <HorizontalStackLayout Grid.Column="2"
+                                                   Spacing="8"
+                                                   VerticalOptions="Center">
+                                <Label Text="Fav"
+                                       TextColor="#E2E8F0"
+                                       VerticalOptions="Center" />
+                                <Switch IsToggled="{Binding FavoritesOnly}"
+                                        Toggled="OnFavoritesOnlyToggled" />
+                            </HorizontalStackLayout>
+                        </Grid>
+                    </VerticalStackLayout>
+                </Border>
+
+                <Border Grid.Row="2"
+                        IsVisible="{Binding IsCategoryManagerVisible}"
+                        Padding="14"
+                        BackgroundColor="#091223"
+                        Stroke="#182A45"
+                        StrokeShape="RoundRectangle 18">
+                    <VerticalStackLayout Spacing="12">
+                        <Grid ColumnDefinitions="*,Auto"
+                              ColumnSpacing="10">
+                            <VerticalStackLayout Spacing="2">
+                                <Label Text="Kategorier"
+                                       FontAttributes="Bold"
+                                       TextColor="#E2E8F0" />
+                                <Label Text="{Binding CategoryManagerHintText}"
+                                       FontSize="12"
+                                       TextColor="#8EA3BF" />
+                            </VerticalStackLayout>
+                            <Button Grid.Column="1"
+                                    Text="Stäng"
+                                    Clicked="OnCloseCategoryManagerClicked"
+                                    BackgroundColor="#1E293B"
+                                    TextColor="#E2E8F0" />
+                        </Grid>
+
+                        <HorizontalStackLayout Spacing="8">
+                            <Button Text="Visa alla"
+                                    Clicked="OnShowAllCategoriesClicked"
+                                    BackgroundColor="#0F172A"
+                                    BorderColor="#334155"
+                                    BorderWidth="1"
+                                    TextColor="#E2E8F0" />
+                            <Button Text="Dölj alla"
+                                    Clicked="OnHideAllCategoriesClicked"
+                                    BackgroundColor="#0F172A"
+                                    BorderColor="#334155"
+                                    BorderWidth="1"
+                                    TextColor="#E2E8F0" />
+                            <Button Text="Nollställ"
+                                    Clicked="OnResetCategoryPreferencesClicked"
+                                    BackgroundColor="#0F172A"
+                                    BorderColor="#334155"
+                                    BorderWidth="1"
+                                    TextColor="#E2E8F0" />
+                        </HorizontalStackLayout>
+
+                        <ScrollView HeightRequest="230">
+                            <VerticalStackLayout BindableLayout.ItemsSource="{Binding CategoryManagerItems}"
+                                                 Spacing="8">
+                                <BindableLayout.ItemTemplate>
+                                    <DataTemplate x:DataType="local:PlaylistCategoryManagerItem">
+                                        <Border Padding="12"
+                                                BackgroundColor="#0F172A"
+                                                Stroke="#1E293B"
+                                                StrokeShape="RoundRectangle 14">
+                                            <Grid ColumnDefinitions="*,Auto,Auto,Auto"
+                                                  ColumnSpacing="10">
+                                                <VerticalStackLayout Spacing="2">
+                                                    <Label Text="{Binding Label}"
+                                                           FontAttributes="Bold"
+                                                           TextColor="#E2E8F0" />
+                                                    <Label Text="{Binding CountLabel}"
+                                                           FontSize="12"
+                                                           TextColor="#8EA3BF" />
+                                                </VerticalStackLayout>
+
+                                                <Switch Grid.Column="1"
+                                                        IsToggled="{Binding IsVisible}"
+                                                        Toggled="OnCategoryVisibilityToggled"
+                                                        VerticalOptions="Center" />
+
+                                                <Button Grid.Column="2"
+                                                        Text="Upp"
+                                                        Clicked="OnMoveCategoryUpClicked"
+                                                        BackgroundColor="#1E293B"
+                                                        TextColor="#E2E8F0"
+                                                        VerticalOptions="Center" />
+
+                                                <Button Grid.Column="3"
+                                                        Text="Ner"
+                                                        Clicked="OnMoveCategoryDownClicked"
+                                                        BackgroundColor="#1E293B"
+                                                        TextColor="#E2E8F0"
+                                                        VerticalOptions="Center" />
+                                            </Grid>
+                                        </Border>
+                                    </DataTemplate>
+                                </BindableLayout.ItemTemplate>
+                            </VerticalStackLayout>
+                        </ScrollView>
+                    </VerticalStackLayout>
+                </Border>
+
+                <ScrollView Grid.Row="3"
+                            Orientation="Horizontal"
+                            HorizontalScrollBarVisibility="Never">
+                    <HorizontalStackLayout BindableLayout.ItemsSource="{Binding CategoryOptions}"
+                                           Spacing="8">
+                        <BindableLayout.ItemTemplate>
+                            <DataTemplate x:DataType="local:BrowseCategoryChip">
+                                <Button Text="{Binding DisplayText}"
+                                        Clicked="OnCategoryChipClicked"
+                                        CommandParameter="{Binding Key}"
+                                        BackgroundColor="#0F172A"
+                                        BorderColor="#334155"
+                                        BorderWidth="1"
+                                        TextColor="#CBD5E1"
+                                        Padding="14,8">
+                                    <Button.Triggers>
+                                        <DataTrigger TargetType="Button"
+                                                     Binding="{Binding IsSelected}"
+                                                     Value="True">
+                                            <Setter Property="BackgroundColor"
+                                                    Value="#0E7490" />
+                                            <Setter Property="BorderColor"
+                                                    Value="#38BDF8" />
+                                            <Setter Property="TextColor"
+                                                    Value="White" />
+                                        </DataTrigger>
+                                    </Button.Triggers>
+                                </Button>
+                            </DataTemplate>
+                        </BindableLayout.ItemTemplate>
+                    </HorizontalStackLayout>
+                </ScrollView>
+
+                <Grid Grid.Row="4">
+                    <Label Text="{Binding StatusText}"
+                           TextColor="#CBD5E1"
+                           VerticalOptions="Center" />
+                </Grid>
+
+                <Grid Grid.Row="5">
+                    <CollectionView ItemsSource="{Binding VisibleChannels}"
+                                    IsVisible="{Binding ShowStandardChannelList}"
+                                    SelectionMode="Single"
+                                    SelectionChanged="OnChannelSelectionChanged"
+                                    RemainingItemsThreshold="8"
+                                    RemainingItemsThresholdReached="OnVisibleChannelsRemainingItemsThresholdReached"
+                                    BackgroundColor="Transparent">
+                        <CollectionView.EmptyView>
+                            <VerticalStackLayout Padding="24"
+                                                 Spacing="6"
+                                                 HorizontalOptions="Center"
+                                                 VerticalOptions="Center">
+                                <Label Text="{Binding EmptyStateText}"
+                                       HorizontalTextAlignment="Center"
+                                       TextColor="#CBD5E1" />
+                            </VerticalStackLayout>
+                        </CollectionView.EmptyView>
+
+                        <CollectionView.ItemTemplate>
+                            <DataTemplate x:DataType="models:PlaylistChannel">
+                                <Border Margin="0,0,0,8"
+                                        Padding="12"
+                                        BackgroundColor="#0F172A"
+                                        Stroke="#1E293B"
+                                        StrokeShape="RoundRectangle 14">
+                                    <Grid ColumnDefinitions="52,*,Auto"
+                                          ColumnSpacing="12">
+                                        <Border WidthRequest="52"
+                                                HeightRequest="52"
+                                                BackgroundColor="#111827"
+                                                Stroke="#334155"
+                                                StrokeShape="RoundRectangle 12">
+                                            <Grid>
+                                                <Label Text="{Binding ArtworkPlaceholderText}"
+                                                       FontAttributes="Bold"
+                                                       FontSize="16"
+                                                       HorizontalTextAlignment="Center"
+                                                       VerticalTextAlignment="Center"
+                                                       TextColor="#64748B">
+                                                    <Label.Triggers>
+                                                        <DataTrigger TargetType="Label"
+                                                                     Binding="{Binding HasArtwork}"
+                                                                     Value="True">
+                                                            <Setter Property="IsVisible"
+                                                                    Value="False" />
+                                                        </DataTrigger>
+                                                    </Label.Triggers>
+                                                </Label>
+
+                                                <Image Source="{Binding ArtworkPath}"
+                                                       Aspect="AspectFit"
+                                                       Opacity="0">
+                                                    <Image.Triggers>
+                                                        <DataTrigger TargetType="Image"
+                                                                     Binding="{Binding HasArtwork}"
+                                                                     Value="True">
+                                                            <Setter Property="Opacity"
+                                                                    Value="1" />
+                                                        </DataTrigger>
+                                                    </Image.Triggers>
+                                                </Image>
+                                            </Grid>
+                                        </Border>
+
+                                        <VerticalStackLayout Grid.Column="1"
+                                                             Spacing="2"
+                                                             VerticalOptions="Center">
+                                            <Label Text="{Binding Name}"
+                                                   FontAttributes="Bold"
+                                                   FontSize="15"
+                                                   TextColor="#E2E8F0"
+                                                   LineBreakMode="TailTruncation" />
+                                            <Label Text="{Binding CategoryName}"
+                                                   FontSize="12"
+                                                   TextColor="#94A3B8"
+                                                   LineBreakMode="TailTruncation" />
+                                            <Label Text="{Binding ContentTypeLabel}"
+                                                   FontSize="11"
+                                                   TextColor="#38BDF8" />
+                                        </VerticalStackLayout>
+
+                                        <Button Grid.Column="2"
+                                                CommandParameter="{Binding .}"
+                                                Clicked="OnFavoriteClicked"
+                                                BackgroundColor="#1E293B"
+                                                TextColor="#E2E8F0"
+                                                VerticalOptions="Center">
+                                            <Button.Triggers>
+                                                <DataTrigger TargetType="Button"
+                                                             Binding="{Binding IsFavorite}"
+                                                             Value="True">
+                                                    <Setter Property="Text"
+                                                            Value="Sparad" />
+                                                    <Setter Property="BackgroundColor"
+                                                            Value="#92400E" />
+                                                </DataTrigger>
+                                                <DataTrigger TargetType="Button"
+                                                             Binding="{Binding IsFavorite}"
+                                                             Value="False">
+                                                    <Setter Property="Text"
+                                                            Value="Spara" />
+                                                </DataTrigger>
+                                            </Button.Triggers>
+                                        </Button>
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </CollectionView.ItemTemplate>
+                    </CollectionView>
+
+                    <CollectionView ItemsSource="{Binding VisibleSeriesGroups}"
+                                    IsVisible="{Binding ShowSeriesOverview}"
+                                    SelectionMode="Single"
+                                    SelectionChanged="OnSeriesGroupSelectionChanged"
+                                    RemainingItemsThreshold="6"
+                                    RemainingItemsThresholdReached="OnVisibleSeriesGroupsRemainingItemsThresholdReached"
+                                    BackgroundColor="Transparent">
+                        <CollectionView.EmptyView>
+                            <VerticalStackLayout Padding="24"
+                                                 Spacing="6"
+                                                 HorizontalOptions="Center"
+                                                 VerticalOptions="Center">
+                                <Label Text="{Binding EmptyStateText}"
+                                       HorizontalTextAlignment="Center"
+                                       TextColor="#CBD5E1" />
+                            </VerticalStackLayout>
+                        </CollectionView.EmptyView>
+
+                        <CollectionView.ItemTemplate>
+                            <DataTemplate x:DataType="models:SeriesGroupItem">
+                                <Border Margin="0,0,0,8"
+                                        Padding="12"
+                                        BackgroundColor="#0F172A"
+                                        Stroke="#1E293B"
+                                        StrokeShape="RoundRectangle 14">
+                                    <Grid ColumnDefinitions="52,*,Auto"
+                                          ColumnSpacing="12">
+                                        <Border WidthRequest="52"
+                                                HeightRequest="52"
+                                                BackgroundColor="#111827"
+                                                Stroke="#334155"
+                                                StrokeShape="RoundRectangle 12">
+                                            <Grid>
+                                                <Label Text="{Binding RepresentativeChannel.ArtworkPlaceholderText}"
+                                                       FontAttributes="Bold"
+                                                       FontSize="16"
+                                                       HorizontalTextAlignment="Center"
+                                                       VerticalTextAlignment="Center"
+                                                       TextColor="#64748B">
+                                                    <Label.Triggers>
+                                                        <DataTrigger TargetType="Label"
+                                                                     Binding="{Binding RepresentativeChannel.HasArtwork}"
+                                                                     Value="True">
+                                                            <Setter Property="IsVisible"
+                                                                    Value="False" />
+                                                        </DataTrigger>
+                                                    </Label.Triggers>
+                                                </Label>
+
+                                                <Image Source="{Binding RepresentativeChannel.ArtworkPath}"
+                                                       Aspect="AspectFit"
+                                                       Opacity="0">
+                                                    <Image.Triggers>
+                                                        <DataTrigger TargetType="Image"
+                                                                     Binding="{Binding RepresentativeChannel.HasArtwork}"
+                                                                     Value="True">
+                                                            <Setter Property="Opacity"
+                                                                    Value="1" />
+                                                        </DataTrigger>
+                                                    </Image.Triggers>
+                                                </Image>
+                                            </Grid>
+                                        </Border>
+
+                                        <VerticalStackLayout Grid.Column="1"
+                                                             Spacing="2"
+                                                             VerticalOptions="Center">
+                                            <Label Text="{Binding Title}"
+                                                   FontAttributes="Bold"
+                                                   FontSize="15"
+                                                   TextColor="#E2E8F0"
+                                                   LineBreakMode="TailTruncation" />
+                                            <Label Text="{Binding CategoryName}"
+                                                   FontSize="12"
+                                                   TextColor="#94A3B8"
+                                                   LineBreakMode="TailTruncation" />
+                                            <Label Text="{Binding SummaryText}"
+                                                   FontSize="11"
+                                                   TextColor="#38BDF8" />
+                                        </VerticalStackLayout>
+
+                                        <Border Grid.Column="2"
+                                                Padding="10,6"
+                                                BackgroundColor="#1E293B"
+                                                Stroke="#334155"
+                                                StrokeShape="RoundRectangle 999"
+                                                VerticalOptions="Center">
+                                            <Label Text="Öppna"
+                                                   FontSize="11"
+                                                   FontAttributes="Bold"
+                                                   TextColor="#E2E8F0" />
+                                        </Border>
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </CollectionView.ItemTemplate>
+                    </CollectionView>
+
+                    <Grid IsVisible="{Binding ShowSeriesDetail}"
+                          RowDefinitions="Auto,Auto,*"
+                          RowSpacing="10">
+                        <Grid ColumnDefinitions="Auto,*"
+                              ColumnSpacing="10">
+                            <Button Text="Tillbaka"
+                                    Clicked="OnSeriesBackClicked"
+                                    BackgroundColor="#1E293B"
+                                    BorderColor="#334155"
+                                    BorderWidth="1"
+                                    TextColor="#E2E8F0" />
+
+                            <VerticalStackLayout Grid.Column="1"
+                                                 Spacing="2">
+                                <Label Text="{Binding SeriesDetailTitle}"
+                                       FontAttributes="Bold"
+                                       FontSize="18"
+                                       TextColor="#E2E8F0" />
+                                <Label Text="{Binding SeriesDetailSubtitle}"
+                                       FontSize="12"
+                                       TextColor="#94A3B8" />
+                            </VerticalStackLayout>
+                        </Grid>
+
+                        <ScrollView Grid.Row="1"
+                                    Orientation="Horizontal"
+                                    HorizontalScrollBarVisibility="Never">
+                            <HorizontalStackLayout BindableLayout.ItemsSource="{Binding VisibleSeriesSeasons}"
+                                                   Spacing="8">
+                                <BindableLayout.ItemTemplate>
+                                    <DataTemplate x:DataType="models:SeriesSeasonItem">
+                                        <Button Text="{Binding Label}"
+                                                CommandParameter="{Binding .}"
+                                                Clicked="OnSeriesSeasonClicked"
+                                                BackgroundColor="#0F172A"
+                                                BorderColor="#334155"
+                                                BorderWidth="1"
+                                                TextColor="#CBD5E1"
+                                                Padding="14,8">
+                                            <Button.Triggers>
+                                                <DataTrigger TargetType="Button"
+                                                             Binding="{Binding IsSelected}"
+                                                             Value="True">
+                                                    <Setter Property="BackgroundColor"
+                                                            Value="#0E7490" />
+                                                    <Setter Property="BorderColor"
+                                                            Value="#38BDF8" />
+                                                    <Setter Property="TextColor"
+                                                            Value="White" />
+                                                </DataTrigger>
+                                            </Button.Triggers>
+                                        </Button>
+                                    </DataTemplate>
+                                </BindableLayout.ItemTemplate>
+                            </HorizontalStackLayout>
+                        </ScrollView>
+
+                        <CollectionView Grid.Row="2"
+                                        ItemsSource="{Binding CurrentSeriesEpisodes}"
+                                        SelectionMode="Single"
+                                        SelectionChanged="OnSeriesEpisodeSelectionChanged"
+                                        BackgroundColor="Transparent">
+                            <CollectionView.EmptyView>
+                                <VerticalStackLayout Padding="24"
+                                                     Spacing="6"
+                                                     HorizontalOptions="Center"
+                                                     VerticalOptions="Center">
+                                    <Label Text="{Binding EmptyStateText}"
+                                           HorizontalTextAlignment="Center"
+                                           TextColor="#CBD5E1" />
+                                </VerticalStackLayout>
+                            </CollectionView.EmptyView>
+
+                            <CollectionView.ItemTemplate>
+                                <DataTemplate x:DataType="models:SeriesEpisodeItem">
+                                    <Border Margin="0,0,0,8"
+                                            Padding="12"
+                                            BackgroundColor="#0F172A"
+                                            Stroke="#1E293B"
+                                            StrokeShape="RoundRectangle 14">
+                                        <Grid ColumnDefinitions="*,Auto"
+                                              ColumnSpacing="12">
+                                            <VerticalStackLayout Spacing="2"
+                                                                 VerticalOptions="Center">
+                                                <Label Text="{Binding Title}"
+                                                       FontAttributes="Bold"
+                                                       FontSize="15"
+                                                       TextColor="#E2E8F0"
+                                                       LineBreakMode="TailTruncation" />
+                                                <Label Text="{Binding Subtitle}"
+                                                       FontSize="12"
+                                                       TextColor="#94A3B8" />
+                                            </VerticalStackLayout>
+
+                                            <Button Grid.Column="1"
+                                                    CommandParameter="{Binding Channel}"
+                                                    Clicked="OnFavoriteClicked"
+                                                    BackgroundColor="#1E293B"
+                                                    TextColor="#E2E8F0"
+                                                    VerticalOptions="Center">
+                                                <Button.Triggers>
+                                                    <DataTrigger TargetType="Button"
+                                                                 Binding="{Binding Channel.IsFavorite}"
+                                                                 Value="True">
+                                                        <Setter Property="Text"
+                                                                Value="Sparad" />
+                                                        <Setter Property="BackgroundColor"
+                                                                Value="#92400E" />
+                                                    </DataTrigger>
+                                                    <DataTrigger TargetType="Button"
+                                                                 Binding="{Binding Channel.IsFavorite}"
+                                                                 Value="False">
+                                                        <Setter Property="Text"
+                                                                Value="Spara" />
+                                                    </DataTrigger>
+                                                </Button.Triggers>
+                                            </Button>
+                                        </Grid>
+                                    </Border>
+                                </DataTemplate>
+                            </CollectionView.ItemTemplate>
+                        </CollectionView>
+                    </Grid>
+
+                </Grid>
+
+                <Grid Grid.RowSpan="6"
+                      IsVisible="{Binding ShowContentLoadingOverlay}"
+                      BackgroundColor="#CC020617"
+                      InputTransparent="False">
+                    <Border Padding="22"
+                            BackgroundColor="#091223"
+                            Stroke="#1E293B"
+                            StrokeShape="RoundRectangle 18"
+                            HorizontalOptions="Center"
+                            VerticalOptions="Center"
+                            MaximumWidthRequest="300">
+                        <VerticalStackLayout Spacing="12">
+                            <ActivityIndicator IsVisible="{Binding ShowContentLoadingOverlay}"
+                                               IsRunning="{Binding ShowContentLoadingOverlay}"
+                                               Color="#38BDF8"
+                                               HeightRequest="42" />
+                            <Label Text="{Binding StatusText}"
+                                   HorizontalTextAlignment="Center"
+                                   TextColor="#E2E8F0" />
+                        </VerticalStackLayout>
+                    </Border>
+                </Grid>
+            </Grid>
+        </Grid>
+
+        <Grid Grid.RowSpan="2"
+              IsVisible="{Binding ShowEmbeddedPlayer}"
+              BackgroundColor="#F2020617"
+              InputTransparent="False">
+            <Grid Padding="16"
+                  RowDefinitions="Auto,*"
+                  RowSpacing="12">
+                <Border Grid.Row="0"
+                        Padding="14,12"
+                        BackgroundColor="#091223"
+                        Stroke="#182A45"
+                        StrokeShape="RoundRectangle 18">
+                    <Grid ColumnDefinitions="*,Auto,Auto"
+                          ColumnSpacing="12">
+                        <VerticalStackLayout Spacing="2">
+                            <Label Text="{Binding EmbeddedPlayerTitle}"
+                                   FontSize="18"
+                                   FontAttributes="Bold"
+                                   TextColor="#F8FAFC"
+                                   LineBreakMode="TailTruncation" />
+                            <Label Text="{Binding EmbeddedPlayerSubtitle}"
+                                   FontSize="12"
+                                   TextColor="#8EA3BF"
+                                   LineBreakMode="TailTruncation" />
+                        </VerticalStackLayout>
+
+                        <Button Grid.Column="1"
+                                Text="Undertexter"
+                                Clicked="OnOpenEmbeddedSubtitleOptionsClicked"
+                                IsEnabled="{Binding CanSelectEmbeddedSubtitles}"
+                                BackgroundColor="#0F172A"
+                                BorderColor="#334155"
+                                BorderWidth="1"
+                                TextColor="#E2E8F0" />
+
+                        <Button Grid.Column="2"
+                                Text="Stäng"
+                                Clicked="OnCloseEmbeddedPlayerClicked"
+                                BackgroundColor="#0F172A"
+                                BorderColor="#334155"
+                                BorderWidth="1"
+                                TextColor="#E2E8F0" />
+                    </Grid>
+                </Border>
+
+                <Border Grid.Row="1"
+                        BackgroundColor="Black"
+                        Stroke="#182A45"
+                        StrokeShape="RoundRectangle 22">
+                    <Grid>
+                        <toolkit:MediaElement x:Name="EmbeddedMediaElement"
+                                              Aspect="AspectFit"
+                                              ShouldAutoPlay="True"
+                                              ShouldShowPlaybackControls="True"
+                                              MediaOpened="OnEmbeddedMediaOpened"
+                                              MediaEnded="OnEmbeddedMediaEnded"
+                                              MediaFailed="OnEmbeddedMediaFailed" />
+
+                        <Grid IsVisible="{Binding IsEmbeddedPlayerLoading}"
+                              BackgroundColor="#B3000000"
+                              InputTransparent="False">
+                            <VerticalStackLayout Spacing="12"
+                                                 HorizontalOptions="Center"
+                                                 VerticalOptions="Center">
+                                <ActivityIndicator IsVisible="{Binding IsEmbeddedPlayerLoading}"
+                                                   IsRunning="{Binding IsEmbeddedPlayerLoading}"
+                                                   Color="#38BDF8"
+                                                   HeightRequest="42" />
+                                <Label Text="{Binding EmbeddedPlayerStatusText}"
+                                       HorizontalTextAlignment="Center"
+                                       TextColor="#E2E8F0" />
+                            </VerticalStackLayout>
+                        </Grid>
+                    </Grid>
+                </Border>
+            </Grid>
+        </Grid>
+    </Grid>
+</ContentPage>

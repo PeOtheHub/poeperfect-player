@@ -170,6 +170,58 @@
             </Setter>
         </Style>
 
+        <Style x:Key="FavoriteHeartToggleStyle" TargetType="ToggleButton">
+            <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+            <Setter Property="Width" Value="44" />
+            <Setter Property="Height" Value="44" />
+            <Setter Property="Background" Value="#111827" />
+            <Setter Property="BorderBrush" Value="#334155" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Foreground" Value="#F8FAFC" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="ToolTip" Value="Favorit" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToggleButton">
+                        <Border x:Name="Border"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="22"
+                                SnapsToDevicePixels="True">
+                            <TextBlock x:Name="HeartGlyph"
+                                       HorizontalAlignment="Center"
+                                       VerticalAlignment="Center"
+                                       Foreground="{TemplateBinding Foreground}"
+                                       FontFamily="Segoe UI Symbol"
+                                       FontSize="23"
+                                       FontWeight="SemiBold"
+                                       LineHeight="24"
+                                       Text="♡"
+                                       TextAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Border" Property="BorderBrush" Value="#EF4444" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Border" Property="Opacity" Value="0.9" />
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="HeartGlyph" Property="Text" Value="♥" />
+                                <Setter TargetName="HeartGlyph" Property="Foreground" Value="#EF4444" />
+                                <Setter TargetName="Border" Property="BorderBrush" Value="#EF4444" />
+                                <Setter TargetName="Border" Property="Background" Value="#1A0B10" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="Border" Property="Opacity" Value="0.45" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <Style x:Key="FullscreenTrackComboBoxItemStyle" TargetType="ComboBoxItem">
             <Setter Property="FocusVisualStyle" Value="{x:Null}" />
             <Setter Property="Foreground" Value="#E2E8F0" />
@@ -812,18 +864,30 @@
                                        FontSize="12"
                                        Text="{Binding StatusMessage}"
                                        TextWrapping="Wrap" />
-                            <Border DockPanel.Dock="Right"
-                                    Margin="16,0,0,0"
-                                    Padding="12,7"
-                                    Background="#04070C"
-                                    BorderBrush="#1E293B"
-                                    BorderThickness="1"
-                                    CornerRadius="12">
-                                <TextBlock Foreground="#22C3FF"
-                                           FontSize="11"
-                                           FontWeight="SemiBold"
-                                           Text="{Binding ChannelCountText}" />
-                            </Border>
+                            <StackPanel DockPanel.Dock="Right"
+                                        Margin="16,0,0,0"
+                                        Orientation="Horizontal"
+                                        VerticalAlignment="Center">
+                                <CheckBox Margin="0,0,12,0"
+                                          VerticalAlignment="Center"
+                                          Content="{Binding CategorySortModeText}"
+                                          Foreground="#CBD5E1"
+                                          FontSize="11"
+                                          FontWeight="SemiBold"
+                                          IsChecked="{Binding SortVodCategoriesByLatest, Mode=TwoWay}"
+                                          Visibility="{Binding ShowCategorySortControls, Converter={StaticResource BooleanToVisibilityConverter}}" />
+
+                                <Border Padding="12,7"
+                                        Background="#04070C"
+                                        BorderBrush="#1E293B"
+                                        BorderThickness="1"
+                                        CornerRadius="12">
+                                    <TextBlock Foreground="#22C3FF"
+                                               FontSize="11"
+                                               FontWeight="SemiBold"
+                                               Text="{Binding ChannelCountText}" />
+                                </Border>
+                            </StackPanel>
                         </DockPanel>
 
                         <ProgressBar Margin="0,12,0,0"
@@ -960,7 +1024,7 @@
                                  Loaded="ChannelGridListBox_Loaded"
                                  Unloaded="ChannelGridListBox_Unloaded"
                                  ItemsSource="{Binding ChannelsView}"
-                                 SelectedItem="{Binding SelectedChannel, Mode=TwoWay}"
+                                 SelectionChanged="MovieGridListBox_SelectionChanged"
                                  Background="Transparent"
                                  BorderThickness="0"
                                  Foreground="White"
@@ -1024,14 +1088,6 @@
                                                                    FontWeight="SemiBold"
                                                                    Text="{Binding ContentTypeLabel}" />
                                                     </Border>
-
-                                                    <CheckBox DockPanel.Dock="Right"
-                                                              Click="FavoriteToggle_Click"
-                                                              Content="Fav"
-                                                              Foreground="#E2E8F0"
-                                                              FontSize="9"
-                                                              FontWeight="SemiBold"
-                                                              IsChecked="{Binding IsFavorite, Mode=TwoWay}" />
                                                 </DockPanel>
 
                                                 <Border Grid.Row="2"
@@ -1058,6 +1114,208 @@
                                 </DataTemplate>
                             </ListBox.ItemTemplate>
                         </ListBox>
+
+                        <Grid Visibility="{Binding ShowMovieDetailView, Converter={StaticResource BooleanToVisibilityConverter}}">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+
+                            <DockPanel Margin="0,0,0,16"
+                                       LastChildFill="True">
+                                <Button DockPanel.Dock="Left"
+                                        MinWidth="92"
+                                        Margin="0,0,12,0"
+                                        Padding="14,9"
+                                        Click="MovieBack_Click"
+                                        Content="Tillbaka" />
+                                <StackPanel>
+                                    <TextBlock Foreground="White"
+                                               FontSize="28"
+                                               FontWeight="SemiBold"
+                                               Text="{Binding MovieDetailTitle}"
+                                               TextWrapping="Wrap" />
+                                    <TextBlock Margin="0,5,0,0"
+                                               Foreground="#64748B"
+                                               FontSize="12"
+                                               Text="{Binding MovieDetailSubtitle}"
+                                               TextWrapping="Wrap" />
+                                </StackPanel>
+                            </DockPanel>
+
+                            <Grid Grid.Row="1">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="300" />
+                                    <ColumnDefinition Width="24" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+
+                                <Border Grid.Column="0"
+                                        Width="284"
+                                        Height="426"
+                                        HorizontalAlignment="Left"
+                                        VerticalAlignment="Top"
+                                        Background="#04070C"
+                                        BorderBrush="#182233"
+                                        BorderThickness="1"
+                                        CornerRadius="14"
+                                        ClipToBounds="True">
+                                    <Grid>
+                                        <Border>
+                                            <Border.Background>
+                                                <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                                                    <GradientStop Color="#101826" Offset="0" />
+                                                    <GradientStop Color="#04070C" Offset="1" />
+                                                </LinearGradientBrush>
+                                            </Border.Background>
+                                        </Border>
+
+                                        <TextBlock HorizontalAlignment="Center"
+                                                   VerticalAlignment="Center"
+                                                   Foreground="#475569"
+                                                   FontSize="18"
+                                                   FontWeight="SemiBold"
+                                                   Text="FILM" />
+
+                                        <Image Source="{Binding MovieDetailPosterImageSource}"
+                                               Stretch="UniformToFill" />
+
+                                        <Border Background="#1E293B"
+                                                Opacity="0.12" />
+                                    </Grid>
+                                </Border>
+
+                                <ScrollViewer Grid.Column="2"
+                                              VerticalScrollBarVisibility="Auto">
+                                    <StackPanel>
+                                        <StackPanel Orientation="Horizontal">
+                                            <Button MinWidth="110"
+                                                    Padding="18,10"
+                                                    Click="MoviePlay_Click"
+                                                    Content="Spela" />
+                                            <ToggleButton Margin="14,0,0,0"
+                                                          VerticalAlignment="Center"
+                                                          Click="MovieFavoriteToggle_Click"
+                                                          IsChecked="{Binding SelectedMovieDetailChannel.IsFavorite, Mode=TwoWay}"
+                                                          Style="{StaticResource FavoriteHeartToggleStyle}" />
+                                        </StackPanel>
+
+                                        <WrapPanel Margin="0,20,0,0">
+                                            <Border Margin="0,0,10,10"
+                                                    Padding="12,7"
+                                                    Background="#09111E"
+                                                    BorderBrush="#182233"
+                                                    BorderThickness="1"
+                                                    CornerRadius="10">
+                                                <TextBlock Foreground="#CBD5E1"
+                                                           FontSize="11"
+                                                           FontWeight="SemiBold"
+                                                           Text="{Binding MovieDetailRating}" />
+                                            </Border>
+                                            <Border Margin="0,0,10,10"
+                                                    Padding="12,7"
+                                                    Background="#09111E"
+                                                    BorderBrush="#182233"
+                                                    BorderThickness="1"
+                                                    CornerRadius="10">
+                                                <TextBlock Foreground="#CBD5E1"
+                                                           FontSize="11"
+                                                           FontWeight="SemiBold"
+                                                           Text="{Binding MovieDetailDuration}" />
+                                            </Border>
+                                            <Border Margin="0,0,10,10"
+                                                    Padding="12,7"
+                                                    Background="#09111E"
+                                                    BorderBrush="#182233"
+                                                    BorderThickness="1"
+                                                    CornerRadius="10">
+                                                <TextBlock Foreground="#CBD5E1"
+                                                           FontSize="11"
+                                                           FontWeight="SemiBold"
+                                                           Text="{Binding MovieDetailReleaseDate}" />
+                                            </Border>
+                                        </WrapPanel>
+
+                                        <TextBlock Margin="0,14,0,0"
+                                                   Foreground="White"
+                                                   FontSize="16"
+                                                   FontWeight="SemiBold"
+                                                   Text="Handling" />
+                                        <TextBlock Margin="0,8,0,0"
+                                                   MaxWidth="760"
+                                                   Foreground="#CBD5E1"
+                                                   FontSize="13"
+                                                   LineHeight="19"
+                                                   Text="{Binding MovieDetailDescription}"
+                                                   TextWrapping="Wrap" />
+
+                                        <Grid Margin="0,22,0,0">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="20" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+                                            <Grid.RowDefinitions>
+                                                <RowDefinition Height="Auto" />
+                                                <RowDefinition Height="Auto" />
+                                                <RowDefinition Height="Auto" />
+                                                <RowDefinition Height="Auto" />
+                                            </Grid.RowDefinitions>
+
+                                            <TextBlock Foreground="#64748B"
+                                                       FontSize="11"
+                                                       FontWeight="SemiBold"
+                                                       Text="Genre" />
+                                            <TextBlock Grid.Row="1"
+                                                       Margin="0,6,0,16"
+                                                       Foreground="#E5E7EB"
+                                                       FontSize="13"
+                                                       Text="{Binding MovieDetailGenre}"
+                                                       TextWrapping="Wrap" />
+
+                                            <TextBlock Grid.Column="2"
+                                                       Foreground="#64748B"
+                                                       FontSize="11"
+                                                       FontWeight="SemiBold"
+                                                       Text="Regi" />
+                                            <TextBlock Grid.Row="1"
+                                                       Grid.Column="2"
+                                                       Margin="0,6,0,16"
+                                                       Foreground="#E5E7EB"
+                                                       FontSize="13"
+                                                       Text="{Binding MovieDetailDirector}"
+                                                       TextWrapping="Wrap" />
+
+                                            <TextBlock Grid.Row="2"
+                                                       Foreground="#64748B"
+                                                       FontSize="11"
+                                                       FontWeight="SemiBold"
+                                                       Text="Cast" />
+                                            <TextBlock Grid.Row="3"
+                                                       Grid.ColumnSpan="3"
+                                                       Margin="0,6,0,0"
+                                                       Foreground="#E5E7EB"
+                                                       FontSize="13"
+                                                       Text="{Binding MovieDetailCast}"
+                                                       TextWrapping="Wrap" />
+                                        </Grid>
+
+                                        <Border Margin="0,22,0,0"
+                                                Padding="12,9"
+                                                Background="#09111E"
+                                                BorderBrush="#182233"
+                                                BorderThickness="1"
+                                                CornerRadius="10"
+                                                Visibility="{Binding ShowMovieDetailStatus, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                            <TextBlock Foreground="#94A3B8"
+                                                       FontSize="12"
+                                                       Text="{Binding MovieDetailStatusText}"
+                                                       TextWrapping="Wrap" />
+                                        </Border>
+                                    </StackPanel>
+                                </ScrollViewer>
+                            </Grid>
+                        </Grid>
 
                         <ListBox x:Name="SeriesGridListBox"
                                  Loaded="ChannelGridListBox_Loaded"

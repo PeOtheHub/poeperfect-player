@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.IO;
 using System.Net.Http;
 using System.Text.RegularExpressions;
@@ -164,7 +165,8 @@ public sealed class M3uPlaylistService
                 resolvedEntry.LogoUrl,
                 resolvedEntry.TvgId,
                 resolvedEntry.TvgName,
-                resolvedEntry.MediaOptions);
+                resolvedEntry.MediaOptions,
+                resolvedEntry.AddedAtUtc);
 
             channels.Add(channel);
             currentBatch.Add(channel);
@@ -220,7 +222,7 @@ public sealed class M3uPlaylistService
     private static PendingEntry ParseExtInf(string line)
     {
         var entry = new PendingEntry();
-        var commaIndex = line.IndexOf(',');
+        var commaIndex = FindDisplayNameSeparator(line);
         var metadataPart = commaIndex >= 0 ? line[..commaIndex] : line;
         var displayName = commaIndex >= 0 ? line[(commaIndex + 1)..].Trim() : string.Empty;
 
@@ -247,6 +249,16 @@ public sealed class M3uPlaylistService
                         entry.Name = value;
                     }
                     break;
+                case "added":
+                case "added-at":
+                case "added_at":
+                case "date-added":
+                case "date_added":
+                case "created":
+                case "created-at":
+                case "created_at":
+                    entry.AddedAtUtc = ParseAddedAt(value);
+                    break;
             }
         }
 
@@ -256,6 +268,59 @@ public sealed class M3uPlaylistService
         }
 
         return entry;
+    }
+
+    private static int FindDisplayNameSeparator(string line)
+    {
+        var isInsideQuotedAttribute = false;
+
+        for (var index = 0; index < line.Length; index++)
+        {
+            var current = line[index];
+            if (current == '"')
+            {
+                isInsideQuotedAttribute = !isInsideQuotedAttribute;
+                continue;
+            }
+
+            if (current == ',' && !isInsideQuotedAttribute)
+            {
+                return index;
+            }
+        }
+
+        return -1;
+    }
+
+    private static DateTimeOffset? ParseAddedAt(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        var trimmed = value.Trim();
+        if (long.TryParse(trimmed, NumberStyles.Integer, CultureInfo.InvariantCulture, out var unixValue))
+        {
+            try
+            {
+                return unixValue > 9_999_999_999L
+                    ? DateTimeOffset.FromUnixTimeMilliseconds(unixValue).ToUniversalTime()
+                    : DateTimeOffset.FromUnixTimeSeconds(unixValue).ToUniversalTime();
+            }
+            catch (ArgumentOutOfRangeException)
+            {
+                return null;
+            }
+        }
+
+        return DateTimeOffset.TryParse(
+            trimmed,
+            CultureInfo.InvariantCulture,
+            DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
+            out var parsed)
+            ? parsed.ToUniversalTime()
+            : null;
     }
 
     private sealed class PendingEntry
@@ -269,6 +334,8 @@ public sealed class M3uPlaylistService
         public string? TvgId { get; set; }
 
         public string? TvgName { get; set; }
+
+        public DateTimeOffset? AddedAtUtc { get; set; }
 
         public List<string> MediaOptions { get; } = [];
     }

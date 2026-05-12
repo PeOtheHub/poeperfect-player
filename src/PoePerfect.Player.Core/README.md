@@ -1,12 +1,15 @@
 # PoePerfect.Player.Core
 
-Planned shared/core project for:
+Shared logic used by multiple PoePerfect Player frontends.
+
+Implemented here right now:
 
 - playlist parsing
+- shared channel model
+- local favorites persistence
+
+Planned later:
+
 - cache handling
 - XMLTV logic
-- shared models
-- cross-platform business logic
-
-Not implemented yet.
-
+- richer shared business logic

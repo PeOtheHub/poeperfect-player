@@ -3,6 +3,7 @@ bin/
 obj/
 publish/
 dist/
+node_modules/
 
 # Visual Studio / IDE
 .vs/
@@ -14,9 +15,9 @@ dist/
 
 # Logs and temporary files
 *.log
+latest-logcat.txt
 *.tmp
 
 # OS files
 Thumbs.db
 Desktop.ini
-

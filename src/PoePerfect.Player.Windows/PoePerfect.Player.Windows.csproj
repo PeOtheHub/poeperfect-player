@@ -12,6 +12,7 @@
     <AssemblyName>PoePerfectPlayer</AssemblyName>
     <Product>PoePerfect Player</Product>
     <Title>PoePerfect Player</Title>
+    <ApplicationIcon>Assets\PoePerfectPlayer.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>

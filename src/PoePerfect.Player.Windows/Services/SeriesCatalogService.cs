@@ -37,6 +37,11 @@ public sealed class SeriesCatalogService
         return parsedEpisodes;
     }
 
+    public string GetSeriesKey(Channel channel)
+    {
+        return ParseEpisode(channel, originalIndex: 0).SeriesKey;
+    }
+
     public string? TryGetSeasonFavoriteKey(Channel channel)
     {
         var parsed = ParseEpisode(channel, originalIndex: 0);
