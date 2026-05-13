@@ -1,5 +1,7 @@
 import {
   ArrowLeft,
+  Captions,
+  CheckCircle2,
   ChevronDown,
   ChevronUp,
   Eye,
@@ -24,6 +26,7 @@ import type {
   CategoryOption,
   CategoryPreferences,
   Channel,
+  ExternalSubtitleTrack,
   MovieDetail,
   SeriesDetail,
   SeriesEpisode,
@@ -43,6 +46,8 @@ import {
   saveStoredSource,
   type RecentEntry,
 } from "./services/storage";
+import { shouldUseGatewayStream, startGatewayStream, stopGatewayStream } from "./services/gateway";
+import { isPreferredSubtitleTrack } from "./services/subtitles";
 import { loadMovieDetail, loadSeriesDetail } from "./services/xtream";
 
 const latestLimit = 20;
@@ -64,6 +69,8 @@ export function App() {
   const [selectedMovie, setSelectedMovie] = useState<Channel | undefined>();
   const [movieDetail, setMovieDetail] = useState<MovieDetail | undefined>();
   const [isMovieDetailLoading, setIsMovieDetailLoading] = useState(false);
+  const [subtitlePrepareStatus, setSubtitlePrepareStatus] = useState("");
+  const [isPreparingSubtitles, setIsPreparingSubtitles] = useState(false);
   const [selectedSeries, setSelectedSeries] = useState<Channel | undefined>();
   const [seriesDetail, setSeriesDetail] = useState<SeriesDetail | undefined>();
   const [selectedSeasonKey, setSelectedSeasonKey] = useState<string | undefined>();
@@ -86,6 +93,7 @@ export function App() {
   );
   const selectedSeason = seriesDetail?.seasons.find((season) => season.key === selectedSeasonKey)
     ?? seriesDetail?.seasons[0];
+  const preparedMovieSubtitles: ExternalSubtitleTrack[] = [];
 
   useEffect(() => {
     if (categories.length > 0 && !categories.some((category) => category.key === selectedCategoryKey)) {
@@ -106,7 +114,7 @@ export function App() {
       }
 
       if (playerChannel) {
-        setPlayerChannel(undefined);
+        closePlayer();
         event.preventDefault();
       } else if (selectedMovie || selectedSeries) {
         closeDetails();
@@ -184,9 +192,15 @@ export function App() {
 
   async function openChannel(channel: Channel) {
     if (channel.contentType === "movies") {
+      abortSubtitlePreparation();
       setSelectedMovie(channel);
       setSelectedSeries(undefined);
       setMovieDetail(undefined);
+      setSubtitlePrepareStatus(
+        shouldUseGatewayStream(channel.url)
+          ? "Gateway-test: svensk inbaddad undertext provas nar du trycker Spela."
+          : "",
+      );
       setIsMovieDetailLoading(true);
       setStatus(`Visar ${channel.name}.`);
       try {
@@ -205,7 +219,7 @@ export function App() {
       return;
     }
 
-    startPlayback(channel);
+    void startPlayback(channel);
   }
 
   async function openSeries(channel: Channel) {
@@ -232,8 +246,41 @@ export function App() {
   }
 
   function startPlayback(channel: Channel) {
+    abortSubtitlePreparation();
     setPlayerChannel(channel);
     setRecent(rememberRecent({ section: channel.contentType, url: channel.url, playedAt: Date.now() }));
+  }
+
+  async function startGatewayPlayback(channel: Channel) {
+    abortSubtitlePreparation();
+    setStatus("Startar lokal gateway...");
+    try {
+      const durationSeconds = selectedMovie?.url === channel.url
+        ? movieDetail?.durationSeconds ?? parseDurationSeconds(movieDetail?.duration ?? "")
+        : channel.durationSeconds;
+      const gateway = await startGatewayStream(channel.url, "swe", 0);
+      setPlayerChannel({
+        ...channel,
+        url: gateway.playlistUrl,
+        originalUrl: channel.url,
+        gatewaySessionId: gateway.sessionId,
+        gatewayStartOffsetSeconds: gateway.startAtSeconds ?? 0,
+        gatewaySubtitleLanguage: "swe",
+        durationSeconds,
+        subtitleTracks: [],
+      });
+      setRecent(rememberRecent({ section: channel.contentType, url: channel.url, playedAt: Date.now() }));
+      setStatus("Spelar via lokal gateway.");
+    } catch (error) {
+      setStatus(error instanceof Error ? `Kunde inte starta gateway: ${error.message}` : "Kunde inte starta gateway.");
+    }
+  }
+
+  function closePlayer() {
+    if (playerChannel?.gatewaySessionId) {
+      void stopGatewayStream(playerChannel.gatewaySessionId);
+    }
+    setPlayerChannel(undefined);
   }
 
   function toggleFavorite(channel: Channel) {
@@ -285,6 +332,8 @@ export function App() {
   }
 
   function closeDetails() {
+    abortSubtitlePreparation();
+    setSubtitlePrepareStatus("");
     setSelectedMovie(undefined);
     setMovieDetail(undefined);
     setIsMovieDetailLoading(false);
@@ -294,8 +343,27 @@ export function App() {
     setIsSeriesDetailLoading(false);
   }
 
+  function abortSubtitlePreparation() {
+    setIsPreparingSubtitles(false);
+  }
+
   if (playerChannel) {
-    return <VideoPlayer channel={playerChannel} onClose={() => setPlayerChannel(undefined)} />;
+    return (
+      <VideoPlayer
+        channel={playerChannel}
+        onClose={closePlayer}
+        onGatewaySessionChange={(gateway) => {
+          setPlayerChannel((current) => current
+            ? {
+                ...current,
+                url: gateway.playlistUrl,
+                gatewaySessionId: gateway.sessionId,
+                gatewayStartOffsetSeconds: gateway.startAtSeconds,
+              }
+            : current);
+        }}
+      />
+    );
   }
 
   return (
@@ -353,6 +421,9 @@ export function App() {
           selectedMovie={selectedMovie}
           movieDetail={movieDetail}
           isMovieDetailLoading={isMovieDetailLoading}
+          subtitlePrepareStatus={subtitlePrepareStatus}
+          isPreparingSubtitles={isPreparingSubtitles}
+          preparedMovieSubtitles={preparedMovieSubtitles}
           selectedSeries={selectedSeries}
           seriesDetail={seriesDetail}
           selectedSeason={selectedSeason}
@@ -367,7 +438,8 @@ export function App() {
           }}
           onOpenChannel={openChannel}
           onMovieBack={closeDetails}
-          onMoviePlay={(channel) => startPlayback(channel)}
+          onMoviePlay={startPlayback}
+          onMovieGatewayPlay={(channel) => void startGatewayPlayback(channel)}
           onFavorite={toggleFavorite}
           onSeriesBack={closeDetails}
           onSeasonSelect={setSelectedSeasonKey}
@@ -605,6 +677,9 @@ function BrowserView({
   selectedMovie,
   movieDetail,
   isMovieDetailLoading,
+  subtitlePrepareStatus,
+  isPreparingSubtitles,
+  preparedMovieSubtitles,
   selectedSeries,
   seriesDetail,
   selectedSeason,
@@ -617,6 +692,7 @@ function BrowserView({
   onOpenChannel,
   onMovieBack,
   onMoviePlay,
+  onMovieGatewayPlay,
   onFavorite,
   onSeriesBack,
   onSeasonSelect,
@@ -630,6 +706,9 @@ function BrowserView({
   selectedMovie: Channel | undefined;
   movieDetail: MovieDetail | undefined;
   isMovieDetailLoading: boolean;
+  subtitlePrepareStatus: string;
+  isPreparingSubtitles: boolean;
+  preparedMovieSubtitles: ExternalSubtitleTrack[];
   selectedSeries: Channel | undefined;
   seriesDetail: SeriesDetail | undefined;
   selectedSeason: SeriesSeason | undefined;
@@ -642,6 +721,7 @@ function BrowserView({
   onOpenChannel: (channel: Channel) => void;
   onMovieBack: () => void;
   onMoviePlay: (channel: Channel) => void;
+  onMovieGatewayPlay: (channel: Channel) => void;
   onFavorite: (channel: Channel) => void;
   onSeriesBack: () => void;
   onSeasonSelect: (seasonKey: string) => void;
@@ -698,8 +778,18 @@ function BrowserView({
             detail={movieDetail}
             isLoading={isMovieDetailLoading}
             isFavorite={favorites.has(selectedMovie.url)}
+            subtitlePrepareStatus={subtitlePrepareStatus}
+            isPreparingSubtitles={isPreparingSubtitles}
+            preparedSubtitleCount={mergeSubtitleTracks(movieDetail?.subtitleTracks ?? selectedMovie.subtitleTracks ?? []).filter(isPreferredSubtitleTrack).length}
             onBack={onMovieBack}
-            onPlay={() => onMoviePlay(selectedMovie)}
+            onPlay={() => onMoviePlay({
+              ...selectedMovie,
+              subtitleTracks: mergeSubtitleTracks([
+                ...(movieDetail?.subtitleTracks ?? selectedMovie.subtitleTracks ?? []),
+                ...preparedMovieSubtitles,
+              ]),
+            })}
+            onGatewayPlay={shouldUseGatewayStream(selectedMovie.url) ? () => onMovieGatewayPlay(selectedMovie) : undefined}
             onFavorite={() => onFavorite(selectedMovie)}
           />
         ) : selectedSeries ? (
@@ -757,16 +847,24 @@ function MovieDetailView({
   detail,
   isLoading,
   isFavorite,
+  subtitlePrepareStatus,
+  isPreparingSubtitles,
+  preparedSubtitleCount,
   onBack,
   onPlay,
+  onGatewayPlay,
   onFavorite,
 }: {
   channel: Channel;
   detail: MovieDetail | undefined;
   isLoading: boolean;
   isFavorite: boolean;
+  subtitlePrepareStatus: string;
+  isPreparingSubtitles: boolean;
+  preparedSubtitleCount: number;
   onBack: () => void;
   onPlay: () => void;
+  onGatewayPlay?: () => void;
   onFavorite: () => void;
 }) {
   const posterUrl = detail?.posterUrl || channel.logoUrl;
@@ -797,6 +895,22 @@ function MovieDetailView({
             <Play size={20} fill="currentColor" />
             Spela
           </button>
+          {onGatewayPlay ? (
+            <button className="icon-text-button" onClick={onGatewayPlay}>
+              <Captions size={18} />
+              Gateway-test
+            </button>
+          ) : null}
+          <div className={`subtitle-prep-status ${isPreparingSubtitles ? "working" : ""} ${preparedSubtitleCount > 0 && !isPreparingSubtitles ? "ready" : ""}`}>
+            {preparedSubtitleCount > 0 && !isPreparingSubtitles ? <CheckCircle2 size={18} /> : <Captions size={18} />}
+            <span>
+              {isPreparingSubtitles
+                ? "Kontrollerar svenska/engelska undertexter..."
+                : preparedSubtitleCount > 0
+                  ? `Externa undertexter klara: ${preparedSubtitleCount} spar`
+                  : subtitlePrepareStatus || "Inga externa undertexter klara."}
+            </span>
+          </div>
         </div>
 
         <p className="plot">{detail?.plot || (isLoading ? "Hämtar metadata..." : "Ingen beskrivning hittades ännu.")}</p>
@@ -893,6 +1007,47 @@ function DetailItem({ label, value, wide }: { label: string; value: string; wide
       <strong>{value}</strong>
     </div>
   );
+}
+
+function mergeSubtitleTracks(tracks: ExternalSubtitleTrack[]) {
+  const seenUrls = new Set<string>();
+  return tracks.filter((track) => {
+    if (seenUrls.has(track.url)) {
+      return false;
+    }
+
+    seenUrls.add(track.url);
+    return true;
+  });
+}
+
+function parseDurationSeconds(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+
+  if (/^\d+$/.test(trimmed)) {
+    const seconds = Number(trimmed);
+    return seconds > 0 ? seconds : undefined;
+  }
+
+  const clockParts = trimmed.split(":").map((part) => Number(part));
+  if (clockParts.length >= 2 && clockParts.length <= 3 && clockParts.every((part) => Number.isFinite(part))) {
+    const [hours, minutes, seconds] = clockParts.length === 3
+      ? clockParts
+      : [0, clockParts[0], clockParts[1]];
+    const total = (hours * 3600) + (minutes * 60) + seconds;
+    return total > 0 ? total : undefined;
+  }
+
+  const normalized = trimmed.toLowerCase();
+  const hourMatch = normalized.match(/(\d+)\s*(?:h|tim|hour)/);
+  const minuteMatch = normalized.match(/(\d+)\s*(?:min|m\b)/);
+  const hours = hourMatch ? Number(hourMatch[1]) : 0;
+  const minutes = minuteMatch ? Number(minuteMatch[1]) : 0;
+  const total = (hours * 3600) + (minutes * 60);
+  return total > 0 ? total : undefined;
 }
 
 function getSectionCounts(channels: Channel[], preferences: CategoryPreferences) {

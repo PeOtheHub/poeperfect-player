@@ -1,4 +1,4 @@
-import type { BrowseSection, Channel } from "../domain";
+import type { BrowseSection, Channel, ExternalSubtitleTrack } from "../domain";
 
 const attributePattern = /([a-zA-Z0-9_-]+)\s*=\s*"([^"]*)"/g;
 const latestAttributeNames = [
@@ -10,6 +10,16 @@ const latestAttributeNames = [
   "created",
   "created-at",
   "created_at",
+];
+const subtitleAttributeNames = [
+  "subtitles",
+  "subtitle",
+  "subtitle-url",
+  "subtitle_url",
+  "tvg-subtitle",
+  "tvg-subtitles",
+  "caption",
+  "captions",
 ];
 
 export function parseM3uPlaylist(content: string): Channel[] {
@@ -47,6 +57,7 @@ export function parseM3uPlaylist(content: string): Channel[] {
       addedAt: pending.addedAt,
       contentType,
       playlistIndex: channels.length,
+      subtitleTracks: pending.subtitleTracks,
     });
     pending = undefined;
   }
@@ -61,6 +72,7 @@ type PendingEntry = {
   tvgId?: string;
   tvgName?: string;
   addedAt?: number;
+  subtitleTracks?: ExternalSubtitleTrack[];
 };
 
 function parseExtInf(line: string): PendingEntry {
@@ -80,7 +92,40 @@ function parseExtInf(line: string): PendingEntry {
     tvgId: attributes.get("tvg-id"),
     tvgName: attributes.get("tvg-name"),
     addedAt: parseAddedAt(latestAttributeNames.map((name) => attributes.get(name)).find(Boolean)),
+    subtitleTracks: parseSubtitleAttributes(attributes),
   };
+}
+
+function parseSubtitleAttributes(attributes: Map<string, string>): ExternalSubtitleTrack[] | undefined {
+  const tracks = subtitleAttributeNames
+    .flatMap((name) => splitSubtitleValues(attributes.get(name)))
+    .map((url, index) => ({
+      id: `m3u-subtitle:${index}:${url}`,
+      label: subtitleLabelFromUrl(url) || `Undertext ${index + 1}`,
+      url,
+    }));
+
+  return tracks.length > 0 ? tracks : undefined;
+}
+
+function splitSubtitleValues(value: string | undefined) {
+  if (!value?.trim()) {
+    return [];
+  }
+
+  return value
+    .split(/\s*[|;,]\s*/g)
+    .map((candidate) => candidate.trim())
+    .filter((candidate) => /^https?:\/\//i.test(candidate) || /\.(srt|vtt)(\?|$)/i.test(candidate));
+}
+
+function subtitleLabelFromUrl(url: string) {
+  const withoutQuery = url.split("?")[0];
+  const fileName = withoutQuery.split(/[\\/]/).pop() ?? "";
+  return decodeURIComponent(fileName)
+    .replace(/\.(srt|vtt)$/i, "")
+    .replace(/[._-]+/g, " ")
+    .trim();
 }
 
 function findDisplayNameSeparator(line: string) {

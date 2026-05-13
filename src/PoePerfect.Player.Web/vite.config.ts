@@ -1,6 +1,9 @@
 import react from "@vitejs/plugin-react";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { defineConfig } from "vite";
+import { configureClientLogApi } from "./dev/clientLogApi";
+import { configureGatewayApi } from "./dev/gatewayApi";
+import { configureSubtitleApi } from "./dev/subtitleApi";
 
 export default defineConfig({
   plugins: [
@@ -10,6 +13,15 @@ export default defineConfig({
       configureServer(server) {
         server.middlewares.use("/api/proxy", async (request, response) => {
           await proxyRemoteRequest(request, response);
+        });
+        configureSubtitleApi((route, handler) => {
+          server.middlewares.use(route, handler);
+        });
+        configureGatewayApi((route, handler) => {
+          server.middlewares.use(route, handler);
+        });
+        configureClientLogApi((route, handler) => {
+          server.middlewares.use(route, handler);
         });
       },
     },

@@ -14,6 +14,19 @@ export type Channel = {
   addedAt?: number;
   contentType: BrowseSection;
   playlistIndex: number;
+  subtitleTracks?: ExternalSubtitleTrack[];
+  durationSeconds?: number;
+  gatewaySessionId?: string;
+  gatewayStartOffsetSeconds?: number;
+  gatewaySubtitleLanguage?: string;
+  originalUrl?: string;
+};
+
+export type ExternalSubtitleTrack = {
+  id: string;
+  label: string;
+  url: string;
+  language?: string;
 };
 
 export type CategoryOption = {
@@ -32,7 +45,9 @@ export type MovieDetail = {
   director: string;
   rating: string;
   duration: string;
+  durationSeconds?: number;
   releaseDate: string;
+  subtitleTracks: ExternalSubtitleTrack[];
 };
 
 export type SeriesEpisode = {

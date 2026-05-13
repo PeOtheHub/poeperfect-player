@@ -23,7 +23,7 @@ The main working product today is the Windows desktop app. A browser-based Web v
 | Area | Status | Notes |
 | --- | --- | --- |
 | Windows desktop app | Active | Main WPF player with playlist browsing, VOD details, playback, favorites, EPG/cache support, and installer output |
-| Web app | Active MVP | React/Vite browser version with Live/Film/Serier browsing, playlist management, search, details, and video playback |
+| Web app | Active MVP | React/Vite browser version with Live/Film/Serier browsing, playlist management, search, details, playback, and a local dev gateway for MKV/HLS testing |
 | Android app | MVP | .NET MAUI app for playlist loading, browsing, search/filtering, favorites, and opening streams |
 | Shared Core | Active | Shared playlist parsing, models, favorites, cache and Xtream-related services |
 | Raspberry Pi/Linux | Planned | Future lightweight/player target |
@@ -58,9 +58,12 @@ The main working product today is the Windows desktop app. A browser-based Web v
 - movie detail view with poster, metadata, description, rating, cast, play, and heart favorite toggle
 - series detail view with seasons and episodes
 - video player using browser playback plus `hls.js`
-- audio track and subtitle selectors in the player
+- audio track and subtitle selectors in the player, shown only when selectable tracks exist
+- subtitle timing adjustment controls in the player
+- auto-hiding player chrome while the mouse is idle
+- local dev gateway for MKV playback with embedded Swedish subtitle conversion to HLS/WebVTT
 - local browser storage for source, favorites, recent playback, and category preferences
-- Vite dev proxy for catalog/API loading during local testing
+- Vite dev proxy for catalog/API loading, gateway playback, and player logging during local testing
 - intended as the base for a future webOS/TV package
 
 ### Android
@@ -129,6 +132,14 @@ Build the web app with:
 ```powershell
 npm run build
 ```
+
+During `npm run dev`, the Web app also exposes local-only helper routes:
+
+- `/api/proxy` for playlist/catalog/API requests that need a browser-safe proxy
+- `/api/gateway/*` for MKV gateway testing through local `ffmpeg`
+- `/api/client-log` for player diagnostics in the Vite console
+
+The gateway is intended for local development. It starts one local `ffmpeg` session per active gateway playback, converts the selected MKV stream to browser-friendly HLS, and exposes embedded Swedish subtitles as an HLS subtitle track when available.
 
 ### Android
 

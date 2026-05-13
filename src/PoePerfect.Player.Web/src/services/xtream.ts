@@ -1,4 +1,12 @@
-import type { Channel, MovieDetail, SeriesDetail, SeriesEpisode, SeriesSeason, XtreamConnection } from "../domain";
+import type {
+  Channel,
+  ExternalSubtitleTrack,
+  MovieDetail,
+  SeriesDetail,
+  SeriesEpisode,
+  SeriesSeason,
+  XtreamConnection,
+} from "../domain";
 import { fetchJson } from "./http";
 import { normalizeCategory, parseAddedAt } from "./m3u";
 
@@ -126,6 +134,12 @@ export async function loadMovieDetail(
   const response = await fetchJson<MovieInfoResponse>(apiUrl(connection, "get_vod_info", { vod_id: streamId }), signal);
   const info = response.info ?? {};
   const movieData = response.movie_data ?? {};
+  const subtitleTracks = extractSubtitleTracks(connection, info, movieData, response);
+  const durationSeconds = normalizeDurationSeconds(
+    stringValue(info.duration_secs),
+    stringValue(info.duration),
+    stringValue(movieData.duration),
+  );
 
   return {
     title: cleanText(stringValue(movieData.name) || stringValue(info.name) || channel.name),
@@ -140,7 +154,9 @@ export async function loadMovieDetail(
     director: cleanText(stringValue(info.director)),
     rating: cleanText(stringValue(info.rating) || stringValue(info.rating_5based)),
     duration: normalizeDuration(stringValue(info.duration_secs), stringValue(info.duration), stringValue(movieData.duration)),
+    durationSeconds,
     releaseDate: cleanText(stringValue(info.releasedate) || stringValue(info.release_date)),
+    subtitleTracks,
   };
 }
 
@@ -362,8 +378,120 @@ function buildSeriesEpisode(
       addedAt: parseAddedAt(stringValue(episode.info?.releasedate)),
       contentType: "series",
       playlistIndex: seriesChannel.playlistIndex,
+      subtitleTracks: extractSubtitleTracks(connection, episode, episode.info),
     },
   };
+}
+
+function extractSubtitleTracks(connection: XtreamConnection, ...sources: unknown[]): ExternalSubtitleTrack[] {
+  const tracks = new Map<string, ExternalSubtitleTrack>();
+
+  function addTrack(rawUrl: string, labelHint?: string, languageHint?: string) {
+    const url = normalizeSubtitleUrl(rawUrl, connection);
+    if (!url || !isLikelySubtitleUrl(url, labelHint)) {
+      return;
+    }
+
+    const language = cleanText(languageHint || "");
+    const label = cleanText(labelHint || language || subtitleLabelFromUrl(url) || `Undertext ${tracks.size + 1}`);
+    if (!tracks.has(url)) {
+      tracks.set(url, {
+        id: `external:${tracks.size}:${url}`,
+        label,
+        url,
+        language: language || undefined,
+      });
+    }
+  }
+
+  function visit(value: unknown, keyHint = "", labelHint = "", languageHint = "") {
+    if (value === null || value === undefined) {
+      return;
+    }
+
+    if (typeof value === "string") {
+      const keyLooksRelevant = /sub|caption|vtt|srt/i.test(keyHint);
+      extractUrls(value).forEach((url) => addTrack(url, labelHint || keyHint, languageHint));
+      if (keyLooksRelevant && extractUrls(value).length === 0) {
+        addTrack(value, labelHint || keyHint, languageHint);
+      }
+      return;
+    }
+
+    if (Array.isArray(value)) {
+      value.forEach((item, index) => visit(item, keyHint, labelHint || `${keyHint} ${index + 1}`, languageHint));
+      return;
+    }
+
+    if (typeof value !== "object") {
+      return;
+    }
+
+    const record = value as Record<string, unknown>;
+    const label =
+      stringValue(record.label) ||
+      stringValue(record.name) ||
+      stringValue(record.title) ||
+      stringValue(record.language) ||
+      stringValue(record.lang) ||
+      labelHint;
+    const language = stringValue(record.language) || stringValue(record.lang) || languageHint;
+
+    for (const urlKey of ["url", "file", "src", "source", "link", "href"]) {
+      if (typeof record[urlKey] === "string") {
+        addTrack(record[urlKey] as string, label, language);
+      }
+    }
+
+    const isSubtitleScope = /sub|caption|vtt|srt/i.test(keyHint);
+    for (const [key, item] of Object.entries(record)) {
+      if (isSubtitleScope || /sub|caption|vtt|srt/i.test(key)) {
+        visit(item, key, label || key, language);
+      }
+    }
+  }
+
+  sources.forEach((source) => visit(source));
+  return [...tracks.values()];
+}
+
+function extractUrls(value: string) {
+  return [...value.matchAll(/https?:\/\/[^\s"'<>]+/gi)].map((match) => match[0]);
+}
+
+function normalizeSubtitleUrl(value: string, connection: XtreamConnection) {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return "";
+  }
+
+  try {
+    return new URL(trimmed).toString();
+  } catch {
+    try {
+      return new URL(trimmed, `${connection.streamBaseUrl}/`).toString();
+    } catch {
+      return "";
+    }
+  }
+}
+
+function isLikelySubtitleUrl(url: string, labelHint = "") {
+  const withoutQuery = url.split("?")[0].toLowerCase();
+  return /\.(srt|vtt)$/.test(withoutQuery) || /sub|caption|vtt|srt/i.test(labelHint);
+}
+
+function subtitleLabelFromUrl(url: string) {
+  try {
+    const pathname = new URL(url).pathname;
+    const fileName = pathname.split("/").pop() ?? "";
+    return decodeURIComponent(fileName)
+      .replace(/\.(srt|vtt)$/i, "")
+      .replace(/[._-]+/g, " ")
+      .trim();
+  } catch {
+    return "";
+  }
 }
 
 function parseEpisodeNumber(value: unknown) {
@@ -404,4 +532,40 @@ function normalizeDuration(...values: string[]) {
   }
 
   return "";
+}
+
+function normalizeDurationSeconds(...values: string[]) {
+  for (const value of values) {
+    const seconds = parseDurationSeconds(value);
+    if (seconds > 0) {
+      return seconds;
+    }
+  }
+
+  return undefined;
+}
+
+function parseDurationSeconds(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return 0;
+  }
+
+  if (/^\d+$/.test(trimmed)) {
+    return Number(trimmed);
+  }
+
+  const clockParts = trimmed.split(":").map((part) => Number(part));
+  if (clockParts.length >= 2 && clockParts.length <= 3 && clockParts.every((part) => Number.isFinite(part))) {
+    const [hours, minutes, seconds] = clockParts.length === 3
+      ? clockParts
+      : [0, clockParts[0], clockParts[1]];
+    return (hours * 3600) + (minutes * 60) + seconds;
+  }
+
+  const hourMatch = trimmed.match(/(\d+)\s*h/i);
+  const minuteMatch = trimmed.match(/(\d+)\s*min/i);
+  const hours = hourMatch ? Number(hourMatch[1]) : 0;
+  const minutes = minuteMatch ? Number(minuteMatch[1]) : 0;
+  return (hours * 3600) + (minutes * 60);
 }

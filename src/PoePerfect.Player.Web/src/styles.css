@@ -840,6 +840,10 @@ label.file-button:focus-within {
 }
 
 .detail-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
   margin-top: 22px;
 }
 
@@ -849,6 +853,32 @@ label.file-button:focus-within {
   border-color: #22c55e;
   background: #12843b;
   font-size: 15px;
+}
+
+.subtitle-prep-status {
+  display: inline-flex;
+  align-items: center;
+  max-width: 560px;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid #1f2937;
+  border-radius: 12px;
+  background: #08101c;
+  color: #9fb3cf;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.subtitle-prep-status.working {
+  border-color: #164e63;
+  color: #67e8f9;
+}
+
+.subtitle-prep-status.ready {
+  border-color: #166534;
+  background: #061a10;
+  color: #86efac;
 }
 
 .plot {
@@ -1052,21 +1082,29 @@ label.file-button:focus-within {
 }
 
 .player-screen {
-  display: grid;
-  grid-template-rows: auto 1fr;
+  position: relative;
+  display: block;
+  overflow: hidden;
   width: 100%;
   height: 100%;
   background: #020305;
 }
 
 .player-topbar {
+  position: absolute;
+  z-index: 3;
+  top: 0;
+  right: 0;
+  left: 0;
   display: grid;
   grid-template-columns: auto 1fr;
   align-items: center;
   gap: 18px;
   padding: 14px 18px;
   border-bottom: 1px solid #1f2937;
-  background: #05080d;
+  background: rgba(5, 8, 13, 0.88);
+  backdrop-filter: blur(10px);
+  transition: opacity 180ms ease, transform 180ms ease;
 }
 
 .player-topbar h1,
@@ -1089,6 +1127,8 @@ label.file-button:focus-within {
 
 .video-stage {
   position: relative;
+  width: 100%;
+  height: 100%;
   min-height: 0;
   background: black;
 }
@@ -1102,11 +1142,11 @@ label.file-button:focus-within {
 
 .player-controls {
   position: absolute;
+  z-index: 3;
   right: 18px;
   bottom: 18px;
   left: 18px;
-  display: grid;
-  grid-template-columns: auto minmax(160px, 1fr) minmax(150px, 210px) minmax(160px, 230px) auto;
+  display: flex;
   align-items: center;
   gap: 12px;
   padding: 12px;
@@ -1114,11 +1154,30 @@ label.file-button:focus-within {
   border-radius: 16px;
   background: rgba(5, 8, 13, 0.88);
   backdrop-filter: blur(10px);
+  transition: opacity 180ms ease, transform 180ms ease;
+}
+
+.player-screen.ui-hidden {
+  cursor: none;
+}
+
+.player-screen.ui-hidden .player-topbar {
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-14px);
+}
+
+.player-screen.ui-hidden .player-controls {
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(14px);
 }
 
 .time-stack {
   display: grid;
+  flex: 1 1 180px;
   gap: 5px;
+  min-width: 160px;
 }
 
 .time-stack input {
@@ -1135,6 +1194,7 @@ label.file-button:focus-within {
   display: grid;
   grid-template-columns: auto 1fr;
   align-items: center;
+  flex: 0 1 230px;
   gap: 8px;
   min-width: 0;
   color: #cbd5e1;
@@ -1148,6 +1208,47 @@ label.file-button:focus-within {
   border-radius: 10px;
   background: #080c13;
   color: #f8fafc;
+}
+
+.subtitle-offset-controls {
+  display: grid;
+  grid-template-columns: 54px minmax(64px, auto) 54px;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.subtitle-offset-controls button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  height: 38px;
+  padding: 0 9px;
+  border: 1px solid #293548;
+  border-radius: 10px;
+  background: #080c13;
+  color: #f8fafc;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.subtitle-offset-controls button:hover,
+.subtitle-offset-controls button:focus-visible {
+  border-color: #38bdf8;
+  color: #7dd3fc;
+}
+
+.subtitle-offset-controls .subtitle-offset-value {
+  color: #7dd3fc;
+}
+
+.track-status-label {
+  max-width: 260px;
+  color: #94a3b8;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.3;
 }
 
 @media (max-width: 980px) {
@@ -1169,9 +1270,24 @@ label.file-button:focus-within {
   .source-settings,
   .manager-header,
   .series-hero,
-  .series-browser,
-  .player-controls {
+  .series-browser {
     grid-template-columns: 1fr;
+  }
+
+  .player-controls {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .time-stack,
+  .track-select-label,
+  .subtitle-offset-controls,
+  .track-status-label {
+    width: 100%;
+  }
+
+  .subtitle-offset-controls {
+    grid-template-columns: 1fr 1fr 1fr;
   }
 
   .source-controls,

@@ -17,5 +17,9 @@ export async function fetchJson<T>(sourceUrl: string, signal?: AbortSignal) {
 }
 
 export function proxiedUrl(sourceUrl: string) {
+  if (/^(\/|blob:|data:)/i.test(sourceUrl)) {
+    return sourceUrl;
+  }
+
   return import.meta.env.DEV ? `/api/proxy?url=${encodeURIComponent(sourceUrl)}` : sourceUrl;
 }
