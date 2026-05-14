@@ -17,7 +17,8 @@ import {
   Tv,
   Upload,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type SyntheticEvent } from "react";
+import { LoadingInline, LoadingOverlay, LoadingSpinner } from "./components/LoadingSpinner";
 import { VideoPlayer } from "./components/VideoPlayer";
 import type {
   AppView,
@@ -40,17 +41,27 @@ import {
   loadFavorites,
   loadRecent,
   loadStoredSource,
+  loadWatchProgress,
   rememberRecent,
   saveCategoryPreferences,
   saveFavorites,
   saveStoredSource,
+  saveWatchProgress,
+  clearWatchProgress,
   type RecentEntry,
 } from "./services/storage";
 import { shouldUseGatewayStream, startGatewayStream, stopGatewayStream } from "./services/gateway";
-import { isPreferredSubtitleTrack } from "./services/subtitles";
+import { probeEmbeddedSubtitleTracks } from "./services/subtitles";
 import { loadMovieDetail, loadSeriesDetail } from "./services/xtream";
 
 const latestLimit = 20;
+const minSearchLength = 2;
+
+type ResumePlaybackRequest = {
+  channel: Channel;
+  mode: "normal" | "gateway";
+  resumeSeconds: number;
+};
 
 export function App() {
   const [view, setView] = useState<AppView>("dashboard");
@@ -64,6 +75,7 @@ export function App() {
   const [managerSection, setManagerSection] = useState<BrowseSection>("movies");
   const [selectedCategoryKey, setSelectedCategoryKey] = useState("__latest");
   const [query, setQuery] = useState("");
+  const [deferredQuery, setDeferredQuery] = useState("");
   const [status, setStatus] = useState("Ange playlist och ladda katalogen.");
   const [isLoading, setIsLoading] = useState(false);
   const [selectedMovie, setSelectedMovie] = useState<Channel | undefined>();
@@ -76,6 +88,7 @@ export function App() {
   const [selectedSeasonKey, setSelectedSeasonKey] = useState<string | undefined>();
   const [isSeriesDetailLoading, setIsSeriesDetailLoading] = useState(false);
   const [playerChannel, setPlayerChannel] = useState<Channel | undefined>();
+  const [resumePrompt, setResumePrompt] = useState<ResumePlaybackRequest | undefined>();
 
   const sectionCounts = useMemo(() => getSectionCounts(catalog, categoryPreferences), [catalog, categoryPreferences]);
   const categories = useMemo(
@@ -84,8 +97,8 @@ export function App() {
   );
   const selectedCategory = categories.find((category) => category.key === selectedCategoryKey) ?? categories[0];
   const visibleChannels = useMemo(
-    () => getVisibleChannels(catalog, section, selectedCategory, favorites, recent, query, categoryPreferences),
-    [catalog, categoryPreferences, favorites, query, recent, section, selectedCategory],
+    () => getVisibleChannels(catalog, section, selectedCategory, favorites, recent, deferredQuery, categoryPreferences),
+    [catalog, categoryPreferences, deferredQuery, favorites, recent, section, selectedCategory],
   );
   const managerItems = useMemo(
     () => buildCategoryManagerItems(catalog, managerSection, categoryPreferences),
@@ -94,6 +107,13 @@ export function App() {
   const selectedSeason = seriesDetail?.seasons.find((season) => season.key === selectedSeasonKey)
     ?? seriesDetail?.seasons[0];
   const preparedMovieSubtitles: ExternalSubtitleTrack[] = [];
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      setDeferredQuery(query.trim().length >= minSearchLength ? query : "");
+    }, 220);
+    return () => window.clearTimeout(timeoutId);
+  }, [query]);
 
   useEffect(() => {
     if (categories.length > 0 && !categories.some((category) => category.key === selectedCategoryKey)) {
@@ -109,6 +129,10 @@ export function App() {
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
+      if (isEditableKeyTarget(event.target)) {
+        return;
+      }
+
       if (event.key !== "Escape" && event.key !== "Backspace") {
         return;
       }
@@ -186,6 +210,7 @@ export function App() {
     setSection(nextSection);
     setSelectedCategoryKey(nextSection === "live" ? "__favorites" : "__latest");
     setQuery("");
+    setDeferredQuery("");
     closeDetails();
     setView(nextView);
   }
@@ -198,11 +223,11 @@ export function App() {
       setMovieDetail(undefined);
       setSubtitlePrepareStatus(
         shouldUseGatewayStream(channel.url)
-          ? "Gateway-test: svensk inbaddad undertext provas nar du trycker Spela."
+          ? "Valj Spela med undertexter om du vill prova inbaddade undertexter via gateway."
           : "",
       );
       setIsMovieDetailLoading(true);
-      setStatus(`Visar ${channel.name}.`);
+      setStatus(`Visar ${cleanCardTitle(channel.name)}.`);
       try {
         const detail = await loadMovieDetail(connection, channel);
         setMovieDetail(detail);
@@ -245,20 +270,76 @@ export function App() {
     }
   }
 
-  function startPlayback(channel: Channel) {
+  function requestPlayback(channel: Channel, mode: ResumePlaybackRequest["mode"]) {
+    const progress = getResumableProgress(channel);
+    if (progress) {
+      setResumePrompt({
+        channel,
+        mode,
+        resumeSeconds: progress.positionSeconds,
+      });
+      return;
+    }
+
+    if (mode === "gateway") {
+      void startGatewayPlayback(channel, 0);
+    } else {
+      startPlayback(channel, 0);
+    }
+  }
+
+  function continueResumePlayback() {
+    if (!resumePrompt) {
+      return;
+    }
+
+    const { channel, mode, resumeSeconds } = resumePrompt;
+    setResumePrompt(undefined);
+    if (mode === "gateway") {
+      void startGatewayPlayback(channel, resumeSeconds);
+    } else {
+      startPlayback(channel, resumeSeconds);
+    }
+  }
+
+  function startResumePlaybackFromBeginning() {
+    if (!resumePrompt) {
+      return;
+    }
+
+    const { channel, mode } = resumePrompt;
+    clearWatchProgress(channel.url);
+    setResumePrompt(undefined);
+    if (mode === "gateway") {
+      void startGatewayPlayback(channel, 0);
+    } else {
+      startPlayback(channel, 0);
+    }
+  }
+
+  function startPlayback(channel: Channel, resumePositionSeconds = 0) {
     abortSubtitlePreparation();
-    setPlayerChannel(channel);
+    setPlayerChannel({
+      ...channel,
+      resumePositionSeconds,
+    });
     setRecent(rememberRecent({ section: channel.contentType, url: channel.url, playedAt: Date.now() }));
   }
 
-  async function startGatewayPlayback(channel: Channel) {
+  async function startGatewayPlayback(channel: Channel, startAtSeconds = 0) {
     abortSubtitlePreparation();
     setStatus("Startar lokal gateway...");
     try {
       const durationSeconds = selectedMovie?.url === channel.url
         ? movieDetail?.durationSeconds ?? parseDurationSeconds(movieDetail?.duration ?? "")
         : channel.durationSeconds;
-      const gateway = await startGatewayStream(channel.url, "swe", 0);
+      const [gateway, embeddedSubtitleTracks] = await Promise.all([
+        startGatewayStream(channel.url, "swe", startAtSeconds),
+        probeEmbeddedSubtitleTracks(channel.url).catch(() => []),
+      ]);
+      const detailSubtitleTracks = selectedMovie?.url === channel.url
+        ? movieDetail?.subtitleTracks ?? []
+        : [];
       setPlayerChannel({
         ...channel,
         url: gateway.playlistUrl,
@@ -266,11 +347,19 @@ export function App() {
         gatewaySessionId: gateway.sessionId,
         gatewayStartOffsetSeconds: gateway.startAtSeconds ?? 0,
         gatewaySubtitleLanguage: "swe",
+        gatewaySubtitleTrackIndex: -1,
+        resumePositionSeconds: startAtSeconds,
         durationSeconds,
-        subtitleTracks: [],
+        subtitleTracks: mergeSubtitleTracks([
+          ...(channel.subtitleTracks ?? []),
+          ...detailSubtitleTracks,
+          ...embeddedSubtitleTracks,
+        ]),
       });
       setRecent(rememberRecent({ section: channel.contentType, url: channel.url, playedAt: Date.now() }));
-      setStatus("Spelar via lokal gateway.");
+      setStatus(embeddedSubtitleTracks.length > 0
+        ? `Spelar via lokal gateway med ${embeddedSubtitleTracks.length} inbaddade undertextspar.`
+        : "Spelar via lokal gateway.");
     } catch (error) {
       setStatus(error instanceof Error ? `Kunde inte starta gateway: ${error.message}` : "Kunde inte starta gateway.");
     }
@@ -281,6 +370,49 @@ export function App() {
       void stopGatewayStream(playerChannel.gatewaySessionId);
     }
     setPlayerChannel(undefined);
+  }
+
+  function savePlayerProgress(positionSeconds: number, durationSeconds: number) {
+    if (!playerChannel || playerChannel.contentType === "live") {
+      return;
+    }
+
+    const sourceUrl = playerChannel.originalUrl ?? playerChannel.url;
+    if (!Number.isFinite(positionSeconds) || positionSeconds < 5) {
+      return;
+    }
+
+    const knownDuration = durationSeconds || playerChannel.durationSeconds || 0;
+    if (knownDuration > 0 && positionSeconds >= knownDuration - 60) {
+      clearWatchProgress(sourceUrl);
+      return;
+    }
+
+    saveWatchProgress({
+      url: sourceUrl,
+      positionSeconds,
+      durationSeconds: knownDuration,
+      updatedAt: Date.now(),
+    });
+  }
+
+  function getResumableProgress(channel: Channel) {
+    if (channel.contentType === "live") {
+      return undefined;
+    }
+
+    const progress = loadWatchProgress(channel.url);
+    if (!progress || progress.positionSeconds < 30) {
+      return undefined;
+    }
+
+    const durationSeconds = channel.durationSeconds || progress.durationSeconds || 0;
+    if (durationSeconds > 0 && progress.positionSeconds >= durationSeconds - 60) {
+      clearWatchProgress(channel.url);
+      return undefined;
+    }
+
+    return progress;
   }
 
   function toggleFavorite(channel: Channel) {
@@ -352,6 +484,7 @@ export function App() {
       <VideoPlayer
         channel={playerChannel}
         onClose={closePlayer}
+        onProgress={savePlayerProgress}
         onGatewaySessionChange={(gateway) => {
           setPlayerChannel((current) => current
             ? {
@@ -359,6 +492,7 @@ export function App() {
                 url: gateway.playlistUrl,
                 gatewaySessionId: gateway.sessionId,
                 gatewayStartOffsetSeconds: gateway.startAtSeconds,
+                gatewaySubtitleTrackIndex: gateway.subtitleTrackIndex,
               }
             : current);
         }}
@@ -438,15 +572,24 @@ export function App() {
           }}
           onOpenChannel={openChannel}
           onMovieBack={closeDetails}
-          onMoviePlay={startPlayback}
-          onMovieGatewayPlay={(channel) => void startGatewayPlayback(channel)}
+          onMoviePlay={(channel) => requestPlayback(channel, "normal")}
+          onMovieGatewayPlay={(channel) => requestPlayback(channel, "gateway")}
           onFavorite={toggleFavorite}
           onSeriesBack={closeDetails}
           onSeasonSelect={setSelectedSeasonKey}
-          onEpisodePlay={(episode) => startPlayback(episode.channel)}
+          onEpisodePlay={(episode) => requestPlayback(episode.channel, "normal")}
           onBackToDashboard={() => setView("dashboard")}
         />
       )}
+      {resumePrompt ? (
+        <ResumePromptDialog
+          title={cleanCardTitle(resumePrompt.channel.name)}
+          resumeSeconds={resumePrompt.resumeSeconds}
+          onContinue={continueResumePlayback}
+          onStartOver={startResumePlaybackFromBeginning}
+          onCancel={() => setResumePrompt(undefined)}
+        />
+      ) : null}
     </main>
   );
 }
@@ -612,13 +755,18 @@ function PlaylistManager({
             />
           </label>
           <button className="icon-text-button" onClick={onLoadFromUrl} disabled={isLoading}>
-            <RefreshCw size={18} />
-            Ladda
+            {isLoading ? <LoadingSpinner size="small" /> : <RefreshCw size={18} />}
+            {isLoading ? "Laddar" : "Ladda"}
           </button>
-          <label className="file-button">
+          <label className={`file-button ${isLoading ? "disabled" : ""}`}>
             <Upload size={18} />
             Fil
-            <input type="file" accept=".m3u,.m3u8,text/*" onChange={(event) => onLoadFromFile(event.target.files?.[0])} />
+            <input
+              type="file"
+              accept=".m3u,.m3u8,text/*"
+              disabled={isLoading}
+              onChange={(event) => onLoadFromFile(event.target.files?.[0])}
+            />
           </label>
         </div>
       </div>
@@ -665,7 +813,47 @@ function PlaylistManager({
           {managerItems.length === 0 && <div className="empty-state">Ladda en katalog för att visa kategorier.</div>}
         </div>
       </div>
+
+      {isLoading ? <LoadingOverlay message={status} /> : null}
     </section>
+  );
+}
+
+function ResumePromptDialog({
+  title,
+  resumeSeconds,
+  onContinue,
+  onStartOver,
+  onCancel,
+}: {
+  title: string;
+  resumeSeconds: number;
+  onContinue: () => void;
+  onStartOver: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <div className="resume-backdrop" role="presentation" onClick={onCancel}>
+      <section className="resume-dialog" role="dialog" aria-modal="true" aria-labelledby="resume-title" onClick={(event) => event.stopPropagation()}>
+        <div>
+          <p>Fortsatt titta?</p>
+          <h2 id="resume-title">{title}</h2>
+          <span>Du slutade vid {formatClockTime(resumeSeconds)}.</span>
+        </div>
+        <div className="resume-actions">
+          <button className="play-button" onClick={onContinue} autoFocus>
+            <Play size={18} fill="currentColor" />
+            Fortsätt
+          </button>
+          <button className="icon-text-button" onClick={onStartOver}>
+            Från början
+          </button>
+          <button className="icon-text-button" onClick={onCancel}>
+            Avbryt
+          </button>
+        </div>
+      </section>
+    </div>
   );
 }
 
@@ -728,13 +916,22 @@ function BrowserView({
   onEpisodePlay: (episode: SeriesEpisode) => void;
   onBackToDashboard: () => void;
 }) {
+  const hasActiveSearch = query.trim().length >= minSearchLength;
   const title = selectedMovie
-    ? selectedMovie.name
+    ? cleanCardTitle(selectedMovie.name)
     : selectedSeries
       ? seriesDetail?.title ?? selectedSeries.name
-      : query
+      : hasActiveSearch
         ? `Sökresultat: ${query}`
-        : selectedCategory?.label ?? sectionLabels[section];
+      : selectedCategory?.label ?? sectionLabels[section];
+  const selectedMovieSubtitleTracks = selectedMovie
+    ? mergeSubtitleTracks([
+        ...(selectedMovie.subtitleTracks ?? []),
+        ...(movieDetail?.subtitleTracks ?? []),
+        ...preparedMovieSubtitles,
+      ])
+    : [];
+  const movieSubtitleCount = selectedMovieSubtitleTracks.length;
 
   return (
     <section className="browser">
@@ -761,16 +958,28 @@ function BrowserView({
       </aside>
 
       <section className="content-surface">
-        <div className="content-header">
-          <div>
-            <h1>{title}</h1>
-            <p>{status}</p>
+        {!selectedMovie && !selectedSeries ? (
+          <div className="content-header">
+            <div>
+              <h1>{title}</h1>
+              <p>{status}</p>
+            </div>
+            <label className="search-box">
+              <Search size={18} />
+              <input
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    event.stopPropagation();
+                  }
+                }}
+                placeholder="Sök minst 2 tecken"
+              />
+            </label>
           </div>
-          <label className="search-box">
-            <Search size={18} />
-            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Sök" />
-          </label>
-        </div>
+        ) : null}
 
         {selectedMovie ? (
           <MovieDetailView
@@ -780,16 +989,22 @@ function BrowserView({
             isFavorite={favorites.has(selectedMovie.url)}
             subtitlePrepareStatus={subtitlePrepareStatus}
             isPreparingSubtitles={isPreparingSubtitles}
-            preparedSubtitleCount={mergeSubtitleTracks(movieDetail?.subtitleTracks ?? selectedMovie.subtitleTracks ?? []).filter(isPreferredSubtitleTrack).length}
+            preparedSubtitleCount={movieSubtitleCount}
             onBack={onMovieBack}
             onPlay={() => onMoviePlay({
               ...selectedMovie,
-              subtitleTracks: mergeSubtitleTracks([
-                ...(movieDetail?.subtitleTracks ?? selectedMovie.subtitleTracks ?? []),
-                ...preparedMovieSubtitles,
-              ]),
+              subtitleTracks: [],
             })}
-            onGatewayPlay={shouldUseGatewayStream(selectedMovie.url) ? () => onMovieGatewayPlay(selectedMovie) : undefined}
+            onSubtitlePlay={
+              shouldUseGatewayStream(selectedMovie.url)
+                ? () => onMovieGatewayPlay(selectedMovie)
+                : movieSubtitleCount > 0
+                  ? () => onMoviePlay({
+                      ...selectedMovie,
+                      subtitleTracks: selectedMovieSubtitleTracks,
+                    })
+                  : undefined
+            }
             onFavorite={() => onFavorite(selectedMovie)}
           />
         ) : selectedSeries ? (
@@ -809,6 +1024,7 @@ function BrowserView({
                 key={channel.id}
                 channel={channel}
                 isFavorite={favorites.has(channel.url)}
+                showCategory={isSpecialCategory(selectedCategory)}
                 onOpen={() => void onOpenChannel(channel)}
               />
             ))}
@@ -823,21 +1039,44 @@ function BrowserView({
 function PosterCard({
   channel,
   isFavorite,
+  showCategory,
   onOpen,
 }: {
   channel: Channel;
   isFavorite: boolean;
+  showCategory: boolean;
   onOpen: () => void;
 }) {
+  const displayTitle = cleanCardTitle(channel.name);
+  const metadata = extractCardMetadata(channel);
+  const [hasPosterError, setHasPosterError] = useState(false);
+  const hasPosterImage = Boolean(channel.logoUrl && !hasPosterError);
   return (
     <button className="poster-card" onClick={onOpen}>
       <div className="poster-art">
-        {channel.logoUrl ? <img src={channel.logoUrl} alt="" loading="lazy" /> : null}
-        <span>{channel.contentType === "live" ? "LIVE" : channel.contentType === "series" ? "SERIE" : "FILM"}</span>
+        {hasPosterImage ? (
+          <img
+            src={channel.logoUrl}
+            alt=""
+            loading="lazy"
+            onError={(event) => hideBrokenPoster(event, setHasPosterError)}
+          />
+        ) : (
+          <div className="poster-placeholder">
+            <span>{channel.contentType === "live" ? "LIVE" : channel.contentType === "series" ? "SERIE" : "FILM"}</span>
+            <strong>{displayTitle}</strong>
+          </div>
+        )}
         {isFavorite ? <Heart className="card-heart" size={18} fill="#EF4444" color="#EF4444" /> : null}
       </div>
-      <strong>{channel.name}</strong>
-      <small>{channel.categoryName}</small>
+      <strong>{displayTitle}</strong>
+      {metadata.length > 0 ? (
+        <div className="poster-meta">
+          {metadata.map((item) => <span key={item}>{item}</span>)}
+        </div>
+      ) : showCategory ? (
+        <small>{channel.categoryName}</small>
+      ) : null}
     </button>
   );
 }
@@ -852,7 +1091,7 @@ function MovieDetailView({
   preparedSubtitleCount,
   onBack,
   onPlay,
-  onGatewayPlay,
+  onSubtitlePlay,
   onFavorite,
 }: {
   channel: Channel;
@@ -864,10 +1103,12 @@ function MovieDetailView({
   preparedSubtitleCount: number;
   onBack: () => void;
   onPlay: () => void;
-  onGatewayPlay?: () => void;
+  onSubtitlePlay?: () => void;
   onFavorite: () => void;
 }) {
   const posterUrl = detail?.posterUrl || channel.logoUrl;
+  const displayTitle = cleanCardTitle(detail?.title || channel.name);
+  const metadata = extractCardMetadata(channel);
 
   return (
     <div className="movie-detail">
@@ -882,7 +1123,12 @@ function MovieDetailView({
       <div className="movie-copy">
         <div className="movie-title-row">
           <div>
-            <h2>{detail?.title || channel.name}</h2>
+            <h2>{displayTitle}</h2>
+            {metadata.length > 0 ? (
+              <div className="detail-meta-chips">
+                {metadata.map((item) => <span key={item}>{item}</span>)}
+              </div>
+            ) : null}
             <p>{metadataText(channel, detail, isLoading)}</p>
           </div>
           <button className="heart-toggle" aria-pressed={isFavorite} onClick={onFavorite}>
@@ -895,17 +1141,17 @@ function MovieDetailView({
             <Play size={20} fill="currentColor" />
             Spela
           </button>
-          {onGatewayPlay ? (
-            <button className="icon-text-button" onClick={onGatewayPlay}>
+          {onSubtitlePlay ? (
+            <button className="icon-text-button" onClick={onSubtitlePlay}>
               <Captions size={18} />
-              Gateway-test
+              Spela med undertexter
             </button>
           ) : null}
           <div className={`subtitle-prep-status ${isPreparingSubtitles ? "working" : ""} ${preparedSubtitleCount > 0 && !isPreparingSubtitles ? "ready" : ""}`}>
             {preparedSubtitleCount > 0 && !isPreparingSubtitles ? <CheckCircle2 size={18} /> : <Captions size={18} />}
             <span>
               {isPreparingSubtitles
-                ? "Kontrollerar svenska/engelska undertexter..."
+                ? "Kontrollerar undertexter..."
                 : preparedSubtitleCount > 0
                   ? `Externa undertexter klara: ${preparedSubtitleCount} spar`
                   : subtitlePrepareStatus || "Inga externa undertexter klara."}
@@ -924,6 +1170,7 @@ function MovieDetailView({
           <DetailItem label="Cast" value={detail?.cast || "Saknas"} wide />
         </div>
       </div>
+      {isLoading ? <LoadingInline message="Hämtar metadata..." /> : null}
     </div>
   );
 }
@@ -996,6 +1243,7 @@ function SeriesDetailView({
           {!isLoading && (selectedSeason?.episodes.length ?? 0) === 0 && <div className="empty-state">Inga avsnitt hittades.</div>}
         </div>
       </div>
+      {isLoading ? <LoadingInline message="Hämtar säsonger och avsnitt..." /> : null}
     </div>
   );
 }
@@ -1019,6 +1267,111 @@ function mergeSubtitleTracks(tracks: ExternalSubtitleTrack[]) {
     seenUrls.add(track.url);
     return true;
   });
+}
+
+function extractCardMetadata(channel: Channel) {
+  const bracketItems = Array.from(channel.name.matchAll(/\[([^\]]+)\]/g))
+    .map((match) => match[1].trim())
+    .filter(Boolean);
+  const text = `${channel.name} ${channel.categoryName}`.toLowerCase();
+  const items: string[] = [];
+  const yearMatch = channel.name.match(/\b(19\d{2}|20\d{2})\b/);
+  if (yearMatch) {
+    items.push(yearMatch[1]);
+  }
+  bracketItems.forEach((item) => {
+    const normalized = normalizeMetadataChip(item);
+    if (normalized && !/^(19\d{2}|20\d{2})$/.test(normalized)) {
+      items.push(normalized);
+    }
+  });
+  if (/\b(?:4k|uhd|2160p)\b/i.test(text)) {
+    items.push("4K");
+  } else if (/\b1080p\b/i.test(text)) {
+    items.push("1080p");
+  }
+  if (/dolby\s*vision|\bdv\b/i.test(text)) {
+    items.push("Dolby Vision");
+  }
+  if (/multi[-\s]*sub|multi\s*subtitle|multi-sub/i.test(text)) {
+    items.push("Multi-Sub");
+  }
+  if (/multi[-\s]*audio|multi\s*audio/i.test(text)) {
+    items.push("Multi-Audio");
+  }
+  if (/\b(?:hdr10?|hdr)\b/i.test(text)) {
+    items.push("HDR");
+  }
+
+  return [...new Set(items)].slice(0, 4);
+}
+
+function hideBrokenPoster(
+  event: SyntheticEvent<HTMLImageElement>,
+  setHasPosterError: (value: boolean) => void,
+) {
+  event.currentTarget.style.display = "none";
+  setHasPosterError(true);
+}
+
+function cleanCardTitle(value: string) {
+  return value
+    .replace(/\[[^\]]+\]/g, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
+function normalizeMetadataChip(value: string) {
+  const normalized = value.trim().replace(/\s+/g, " ");
+  const lower = normalized.toLowerCase();
+  if (!normalized) {
+    return "";
+  }
+  if (/^(multi[-\s]*sub|multi\s*subtitle)s?$/i.test(normalized)) {
+    return "Multi-Sub";
+  }
+  if (/^multi[-\s]*audio$/i.test(normalized)) {
+    return "Multi-Audio";
+  }
+  if (/^dolby\s*vision$/i.test(normalized)) {
+    return "Dolby Vision";
+  }
+  if (lower === "pre") {
+    return "PRE";
+  }
+  if (/^(4k|uhd|2160p)$/i.test(normalized)) {
+    return "4K";
+  }
+  if (/^(1080p|720p|hdr|hdr10)$/i.test(normalized)) {
+    return normalized.toUpperCase();
+  }
+
+  return normalized.length <= 18 ? normalized : "";
+}
+
+function formatClockTime(seconds: number) {
+  if (!Number.isFinite(seconds) || seconds <= 0) {
+    return "00:00";
+  }
+
+  const totalSeconds = Math.floor(seconds);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const remainingSeconds = totalSeconds % 60;
+  return hours > 0
+    ? `${hours}:${minutes.toString().padStart(2, "0")}:${remainingSeconds.toString().padStart(2, "0")}`
+    : `${minutes.toString().padStart(2, "0")}:${remainingSeconds.toString().padStart(2, "0")}`;
+}
+
+function isEditableKeyTarget(target: EventTarget | null) {
+  if (!(target instanceof HTMLElement)) {
+    return false;
+  }
+
+  return target instanceof HTMLInputElement
+    || target instanceof HTMLTextAreaElement
+    || target instanceof HTMLSelectElement
+    || target.isContentEditable;
 }
 
 function parseDurationSeconds(value: string) {
@@ -1101,7 +1454,9 @@ function getVisibleChannels(
   preferences: CategoryPreferences,
 ) {
   const sectionChannels = getSectionChannels(catalog, section, preferences);
-  const normalizedQuery = query.trim().toLowerCase();
+  const normalizedQuery = query.trim().length >= minSearchLength
+    ? query.trim().toLowerCase()
+    : "";
   let channels: Channel[];
 
   if (normalizedQuery) {

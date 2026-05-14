@@ -1,29 +1,48 @@
 import Hls from "hls.js";
 import { ArrowLeft, Captions, Maximize, Minus, Pause, Play, Plus, Volume2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import type { KeyboardEvent, ReactNode } from "react";
+import { LoadingSpinner } from "./LoadingSpinner";
 import type { Channel } from "../domain";
 import { startGatewayStream, stopGatewayStream } from "../services/gateway";
 import { fetchText } from "../services/http";
-import { isPreferredSubtitleTrack } from "../services/subtitles";
 
 type VideoPlayerProps = {
   channel: Channel;
   onClose: () => void;
-  onGatewaySessionChange?: (gateway: { sessionId: string; playlistUrl: string; startAtSeconds: number }) => void;
+  onProgress?: (positionSeconds: number, durationSeconds: number) => void;
+  onGatewaySessionChange?: (gateway: {
+    sessionId: string;
+    playlistUrl: string;
+    startAtSeconds: number;
+    audioTrackIndex: number;
+    subtitleTrackIndex: number;
+  }) => void;
 };
 
 type TrackOption = {
   value: string;
-  source: "hls" | "native" | "external";
+  source: "hls" | "native" | "external" | "gateway" | "gateway-subtitle";
   id: number;
   label: string;
   language?: string;
   url?: string;
 };
 
-type LoadedExternalSubtitleTrack = {
-  element: HTMLTrackElement;
-  objectUrl: string;
+type MediaTrackProbeResponse = {
+  audioTracks?: Array<{
+    audioTrackIndex?: number;
+    label?: string;
+    language?: string;
+  }>;
+};
+
+type TrackPickerKind = "audio" | "subtitle";
+
+type SubtitleCue = {
+  startTime: number;
+  endTime: number;
+  text: string;
 };
 
 type NativeAudioTrackList = EventTarget & {
@@ -41,54 +60,97 @@ type MutableTextTrackCue = TextTrackCue & {
   endTime: number;
 };
 
+type OriginalTextTrackCueTime = {
+  startTime: number;
+  endTime: number;
+};
+
+type PositionedTextTrackCue = TextTrackCue & {
+  line: number | "auto";
+};
+
 const noAudioTrack = "";
 const subtitlesOff = "off";
 const uiAutoHideMs = 2500;
 const maxSubtitleOffsetSeconds = 30;
+const subtitleLineDefault = -2;
+const subtitleLineWithControlsVisible = -6;
+const progressReportIntervalMs = 5000;
 
-export function VideoPlayer({ channel, onClose, onGatewaySessionChange }: VideoPlayerProps) {
+export function VideoPlayer({ channel, onClose, onProgress, onGatewaySessionChange }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const hlsRef = useRef<Hls | null>(null);
   const activeGatewaySessionRef = useRef(channel.gatewaySessionId);
   const activeChannelUrlRef = useRef(channel.url);
   const gatewayOffsetRef = useRef(channel.gatewayStartOffsetSeconds ?? 0);
+  const gatewayAudioTrackIndexRef = useRef(0);
+  const gatewaySubtitleTrackIndexRef = useRef(channel.gatewaySubtitleTrackIndex ?? -1);
+  const isUsingGatewayAudioTracksRef = useRef(false);
   const selectedSubtitleTrackRef = useRef(subtitlesOff);
   const shouldRestoreGatewaySubtitleRef = useRef(false);
+  const subtitleTrackToRestoreRef = useRef(subtitlesOff);
   const activeSubtitleLoadAbortRef = useRef<AbortController | null>(null);
-  const loadedExternalSubtitlesRef = useRef(new Map<string, LoadedExternalSubtitleTrack>());
-  const subtitleCueOffsetsRef = useRef(new WeakMap<TextTrackCue, number>());
+  const loadedExternalSubtitlesRef = useRef(new Map<string, SubtitleCue[]>());
+  const activeOverlaySubtitleCuesRef = useRef<SubtitleCue[]>([]);
+  const overlaySubtitleFrameRef = useRef<number | undefined>();
+  const overlaySubtitleIndexRef = useRef(-1);
+  const overlaySubtitleTextRef = useRef("");
+  const originalSubtitleCueTimesRef = useRef(new WeakMap<TextTrackCue, OriginalTextTrackCueTime>());
+  const originalSubtitleCueLinesRef = useRef(new WeakMap<TextTrackCue, PositionedTextTrackCue["line"]>());
   const subtitleOffsetRef = useRef(0);
   const uiHideTimeoutRef = useRef<number | undefined>();
+  const isPointerOverPlayerChromeRef = useRef(false);
   const shouldAutoPlayRef = useRef(true);
+  const lastProgressReportAtRef = useRef(0);
+  const hasAppliedResumePositionRef = useRef(false);
+  const onProgressRef = useRef(onProgress);
   const [activeSourceUrl, setActiveSourceUrl] = useState(channel.url);
   const [gatewayOffset, setGatewayOffset] = useState(channel.gatewayStartOffsetSeconds ?? 0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
+  const [knownTimelineDuration, setKnownTimelineDuration] = useState(channel.durationSeconds ?? 0);
   const [audioTracks, setAudioTracks] = useState<TrackOption[]>([]);
   const [mediaSubtitleTracks, setMediaSubtitleTracks] = useState<TrackOption[]>([]);
   const [externalSubtitleTracks, setExternalSubtitleTracks] = useState<TrackOption[]>([]);
   const [selectedAudioTrack, setSelectedAudioTrack] = useState(noAudioTrack);
   const [selectedSubtitleTrack, setSelectedSubtitleTrack] = useState(subtitlesOff);
+  const [overlaySubtitleText, setOverlaySubtitleText] = useState("");
   const [subtitleProbeMessage, setSubtitleProbeMessage] = useState("");
   const [scrubTime, setScrubTime] = useState<number | undefined>();
   const [subtitleOffsetSeconds, setSubtitleOffsetSeconds] = useState(0);
   const [isUiVisible, setIsUiVisible] = useState(true);
+  const [isBuffering, setIsBuffering] = useState(true);
+  const [trackPicker, setTrackPicker] = useState<TrackPickerKind | undefined>();
   const isGatewayPlayback = Boolean(channel.gatewaySessionId && channel.originalUrl);
+
+  useEffect(() => {
+    onProgressRef.current = onProgress;
+  }, [onProgress]);
 
   useEffect(() => {
     const nextOffset = channel.gatewayStartOffsetSeconds ?? 0;
     activeGatewaySessionRef.current = channel.gatewaySessionId;
     gatewayOffsetRef.current = nextOffset;
+    gatewaySubtitleTrackIndexRef.current = channel.gatewaySubtitleTrackIndex ?? gatewaySubtitleTrackIndexRef.current;
     setGatewayOffset(nextOffset);
     setActiveSourceUrl(channel.url);
     setScrubTime(undefined);
+    setKnownTimelineDuration(channel.durationSeconds ?? 0);
+    setIsBuffering(true);
     shouldAutoPlayRef.current = true;
-    shouldRestoreGatewaySubtitleRef.current = false;
-  }, [channel.gatewaySessionId, channel.gatewayStartOffsetSeconds, channel.url]);
+    hasAppliedResumePositionRef.current = false;
+  }, [channel.durationSeconds, channel.gatewaySessionId, channel.gatewayStartOffsetSeconds, channel.gatewaySubtitleTrackIndex, channel.url]);
 
   useEffect(() => {
     selectedSubtitleTrackRef.current = selectedSubtitleTrack;
+    const parsedTrack = parseTrackValue(selectedSubtitleTrack);
+    if (parsedTrack?.source !== "external") {
+      activeOverlaySubtitleCuesRef.current = [];
+      overlaySubtitleIndexRef.current = -1;
+      stopOverlaySubtitleLoop();
+      setOverlaySubtitleTextIfChanged("");
+    }
   }, [selectedSubtitleTrack]);
 
   useEffect(() => {
@@ -97,13 +159,30 @@ export function VideoPlayer({ channel, onClose, onGatewaySessionChange }: VideoP
   }, [activeSourceUrl, subtitleOffsetSeconds]);
 
   useEffect(() => {
+    applySubtitleControlLift();
+  }, [activeSourceUrl, isUiVisible, selectedSubtitleTrack]);
+
+  useEffect(() => {
     revealPlayerUi();
     return () => {
       if (uiHideTimeoutRef.current) {
         window.clearTimeout(uiHideTimeoutRef.current);
       }
+      stopOverlaySubtitleLoop();
     };
   }, [activeSourceUrl]);
+
+  useEffect(() => {
+    if (!trackPicker) {
+      return;
+    }
+
+    setIsUiVisible(true);
+    if (uiHideTimeoutRef.current) {
+      window.clearTimeout(uiHideTimeoutRef.current);
+      uiHideTimeoutRef.current = undefined;
+    }
+  }, [trackPicker]);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -120,14 +199,26 @@ export function VideoPlayer({ channel, onClose, onGatewaySessionChange }: VideoP
     player.playsInline = true;
     player.preload = "auto";
     activeChannelUrlRef.current = activeSourceUrl;
+    const shouldKeepSubtitleChoice = shouldRestoreGatewaySubtitleRef.current
+      && selectedSubtitleTrackRef.current !== subtitlesOff;
+    const shouldKeepGatewayTrackChoices = isGatewayPlayback;
+    isUsingGatewayAudioTracksRef.current = false;
     clearLoadedExternalSubtitles();
-    subtitleCueOffsetsRef.current = new WeakMap<TextTrackCue, number>();
-    setAudioTracks([]);
-    setMediaSubtitleTracks([]);
-    setExternalSubtitleTracks([]);
-    setSelectedAudioTrack(noAudioTrack);
-    setSelectedSubtitleTrack(subtitlesOff);
+    originalSubtitleCueTimesRef.current = new WeakMap<TextTrackCue, OriginalTextTrackCueTime>();
+    originalSubtitleCueLinesRef.current = new WeakMap<TextTrackCue, PositionedTextTrackCue["line"]>();
+    if (!shouldKeepGatewayTrackChoices) {
+      setAudioTracks([]);
+      setSelectedAudioTrack(noAudioTrack);
+    }
+    if (!shouldKeepSubtitleChoice && !shouldKeepGatewayTrackChoices) {
+      setMediaSubtitleTracks([]);
+      setExternalSubtitleTracks([]);
+    }
+    if (!shouldKeepSubtitleChoice && !shouldKeepGatewayTrackChoices) {
+      setSelectedSubtitleTrack(subtitlesOff);
+    }
     setSubtitleProbeMessage("");
+    setIsBuffering(true);
 
     function refreshNativeAudioTracks() {
       const nativeAudioTracks = (player as HTMLVideoElement & { audioTracks?: NativeAudioTrackList }).audioTracks;
@@ -156,11 +247,7 @@ export function VideoPlayer({ channel, onClose, onGatewaySessionChange }: VideoP
         return;
       }
 
-      const loadedExternalTextTracks = new Set(
-        Array.from(loadedExternalSubtitlesRef.current.values()).map((track) => track.element.track),
-      );
-      const nativeSubtitleTracks = getSelectableTextTracks(player)
-        .filter((track) => !loadedExternalTextTracks.has(track));
+      const nativeSubtitleTracks = getSelectableTextTracks(player);
       if (nativeSubtitleTracks.length > 0) {
         setSubtitleProbeMessage("");
       }
@@ -188,21 +275,28 @@ export function VideoPlayer({ channel, onClose, onGatewaySessionChange }: VideoP
         return;
       }
 
-      const preferredExternalTracks = externalTracks.filter(isPreferredSubtitleTrack);
-      if (preferredExternalTracks.length === 0) {
-        setSubtitleProbeMessage(`Hittade ${externalTracks.length} undertextspar, men inga svenska eller engelska.`);
-        return;
-      }
-
       setExternalSubtitleTracks(
-        preferredExternalTracks.map((track, index) => ({
-          value: makeTrackValue("external", index),
-          source: "external",
-          id: index,
-          label: track.label,
-          language: track.language,
-          url: track.url,
-        })),
+        externalTracks.map((track, index) => {
+          const gatewaySubtitleTrackIndex = isGatewayPlayback ? getGatewaySubtitleTrackIndex(track) : undefined;
+          if (gatewaySubtitleTrackIndex !== undefined) {
+            return {
+              value: makeTrackValue("gateway-subtitle", gatewaySubtitleTrackIndex),
+              source: "gateway-subtitle" as const,
+              id: gatewaySubtitleTrackIndex,
+              label: track.label,
+              language: track.language,
+            };
+          }
+
+          return {
+            value: makeTrackValue("external", index),
+            source: "external" as const,
+            id: index,
+            label: track.label,
+            language: track.language,
+            url: track.url,
+          };
+        }),
       );
     }
 
@@ -217,9 +311,13 @@ export function VideoPlayer({ channel, onClose, onGatewaySessionChange }: VideoP
       if (error) {
         setSubtitleProbeMessage(`Video-fel: ${error.message || `kod ${error.code}`}`);
       }
+      setIsBuffering(false);
     }
 
     function reportVideoWaiting() {
+      if (!player.paused || shouldAutoPlayRef.current) {
+        setIsBuffering(true);
+      }
       logPlayerEvent("video.waiting", {
         currentTime: player.currentTime,
         networkState: player.networkState,
@@ -228,6 +326,8 @@ export function VideoPlayer({ channel, onClose, onGatewaySessionChange }: VideoP
     }
 
     function reportVideoPlaying() {
+      setIsBuffering(false);
+      applyCurrentSubtitleOffset();
       logPlayerEvent("video.playing", {
         currentTime: player.currentTime,
         readyState: player.readyState,
@@ -238,6 +338,9 @@ export function VideoPlayer({ channel, onClose, onGatewaySessionChange }: VideoP
     }
 
     function reportVideoStalled() {
+      if (!player.paused || shouldAutoPlayRef.current) {
+        setIsBuffering(true);
+      }
       logPlayerEvent("video.stalled", {
         currentTime: player.currentTime,
         networkState: player.networkState,
@@ -263,6 +366,7 @@ export function VideoPlayer({ channel, onClose, onGatewaySessionChange }: VideoP
           if (isGatewayPlayback && error instanceof DOMException && error.name === "NotAllowedError") {
             setSubtitleProbeMessage("Tryck Spela for att starta.");
           }
+          setIsBuffering(false);
         });
       }
     }
@@ -289,6 +393,7 @@ export function VideoPlayer({ channel, onClose, onGatewaySessionChange }: VideoP
         logPlayerEvent("hls.media_attached");
       });
       hls.on(Hls.Events.MANIFEST_LOADING, (_, data) => {
+        setIsBuffering(true);
         logHlsEvent("hls.manifest_loading", data);
       });
       hls.on(Hls.Events.MANIFEST_LOADED, (_, data) => {
@@ -308,6 +413,10 @@ export function VideoPlayer({ channel, onClose, onGatewaySessionChange }: VideoP
         ensurePlayback("frag_parsed");
       });
       hls.on(Hls.Events.AUDIO_TRACKS_UPDATED, (_, data) => {
+        if (isGatewayPlayback && isUsingGatewayAudioTracksRef.current) {
+          return;
+        }
+
         const tracks = data.audioTracks.map((track, index) => ({
           value: makeTrackValue("hls", index),
           source: "hls" as const,
@@ -318,9 +427,26 @@ export function VideoPlayer({ channel, onClose, onGatewaySessionChange }: VideoP
         setSelectedAudioTrack(tracks[hls?.audioTrack ?? 0]?.value ?? tracks[0]?.value ?? noAudioTrack);
       });
       hls.on(Hls.Events.AUDIO_TRACK_SWITCHED, () => {
+        if (isGatewayPlayback && isUsingGatewayAudioTracksRef.current) {
+          return;
+        }
+
         setSelectedAudioTrack(makeTrackValue("hls", hls?.audioTrack ?? 0));
       });
       hls.on(Hls.Events.SUBTITLE_TRACKS_UPDATED, (_, data) => {
+        if (isGatewayPlayback) {
+          if (gatewaySubtitleTrackIndexRef.current >= 0 && data.subtitleTracks.length > 0) {
+            hls!.subtitleDisplay = true;
+            hls!.subtitleTrack = 0;
+            syncNativeSubtitleModes(player, 0);
+            applyCurrentSubtitleOffset();
+            setSubtitleProbeMessage("");
+          }
+          shouldRestoreGatewaySubtitleRef.current = false;
+          subtitleTrackToRestoreRef.current = subtitlesOff;
+          return;
+        }
+
         const tracks = data.subtitleTracks.map((track, index) => ({
           value: makeTrackValue("hls", index),
           source: "hls" as const,
@@ -329,17 +455,40 @@ export function VideoPlayer({ channel, onClose, onGatewaySessionChange }: VideoP
         }));
         setMediaSubtitleTracks(tracks);
         const shouldRestoreGatewaySubtitle = isGatewayPlayback && shouldRestoreGatewaySubtitleRef.current && tracks.length > 0;
+        const restoreTrack = parseTrackValue(subtitleTrackToRestoreRef.current);
+        const restoredTrackId = restoreTrack?.source === "hls" && tracks[restoreTrack.id]
+          ? restoreTrack.id
+          : 0;
         hls!.subtitleDisplay = shouldRestoreGatewaySubtitle;
-        hls!.subtitleTrack = shouldRestoreGatewaySubtitle ? 0 : -1;
-        setSelectedSubtitleTrack(shouldRestoreGatewaySubtitle ? tracks[0].value : subtitlesOff);
+        hls!.subtitleTrack = shouldRestoreGatewaySubtitle ? restoredTrackId : -1;
+        setSelectedSubtitleTrack(shouldRestoreGatewaySubtitle ? tracks[restoredTrackId].value : subtitlesOff);
+        applyCurrentSubtitleOffset();
+        if (shouldRestoreGatewaySubtitle) {
+          shouldRestoreGatewaySubtitleRef.current = false;
+          subtitleTrackToRestoreRef.current = subtitlesOff;
+        }
       });
       hls.on(Hls.Events.SUBTITLE_TRACKS_CLEARED, () => {
+        if (isGatewayPlayback) {
+          setMediaSubtitleTracks([]);
+          return;
+        }
+
         setMediaSubtitleTracks([]);
-        setSelectedSubtitleTrack(subtitlesOff);
+        if (!shouldRestoreGatewaySubtitleRef.current) {
+          setSelectedSubtitleTrack(subtitlesOff);
+        }
       });
       hls.on(Hls.Events.SUBTITLE_TRACK_SWITCH, (_, data) => {
+        if (isGatewayPlayback && gatewaySubtitleTrackIndexRef.current >= 0) {
+          syncNativeSubtitleModes(player, data.id);
+          applyCurrentSubtitleOffset();
+          return;
+        }
+
         setSelectedSubtitleTrack(data.id >= 0 ? makeTrackValue("hls", data.id) : subtitlesOff);
         syncNativeSubtitleModes(player, data.id);
+        applyCurrentSubtitleOffset();
       });
       hls.on(Hls.Events.NON_NATIVE_TEXT_TRACKS_FOUND, () => {
         applyCurrentSubtitleOffset();
@@ -355,6 +504,7 @@ export function VideoPlayer({ channel, onClose, onGatewaySessionChange }: VideoP
         logHlsEvent("hls.error", data);
         if (data.fatal) {
           setSubtitleProbeMessage(`Gateway/player-fel: ${data.details}`);
+          setIsBuffering(false);
         }
       });
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
@@ -376,25 +526,60 @@ export function VideoPlayer({ channel, onClose, onGatewaySessionChange }: VideoP
     const nativeAudioTracks = (player as HTMLVideoElement & { audioTracks?: NativeAudioTrackList }).audioTracks;
     nativeAudioTracks?.addEventListener("addtrack", refreshNativeAudioTracks);
     nativeAudioTracks?.addEventListener("change", refreshNativeAudioTracks);
-    player.textTracks?.addEventListener("addtrack", refreshNativeSubtitleTracks);
-    player.textTracks?.addEventListener("change", refreshNativeSubtitleTracks);
+    const refreshNativeSubtitleTracksAndOffset = () => {
+      refreshNativeSubtitleTracks();
+      applyCurrentSubtitleOffset();
+    };
+    player.textTracks?.addEventListener("addtrack", refreshNativeSubtitleTracksAndOffset);
+    player.textTracks?.addEventListener("change", refreshNativeSubtitleTracksAndOffset);
     void loadExternalSubtitleTracks();
+    if (isGatewayPlayback && channel.originalUrl) {
+      void loadGatewayAudioTracks(channel.originalUrl);
+    }
 
-    const updatePlaying = () => setIsPlaying(!video.paused);
+    const updatePlaying = () => {
+      setIsPlaying(!video.paused);
+      if (video.paused) {
+        setIsBuffering(false);
+      }
+    };
     const updateTime = () => {
       setCurrentTime(video.currentTime || 0);
-      setDuration(Number.isFinite(video.duration) ? video.duration : 0);
+      const nextDuration = Number.isFinite(video.duration) ? video.duration : 0;
+      setDuration(nextDuration);
+      const observedTimelineDuration = isGatewayPlayback
+        ? gatewayOffsetRef.current + nextDuration
+        : nextDuration;
+      if (observedTimelineDuration > 0) {
+        setKnownTimelineDuration((current) => Math.max(current, observedTimelineDuration, channel.durationSeconds ?? 0));
+      }
+      reportWatchProgress(video.currentTime || 0, observedTimelineDuration);
+    };
+    const showBuffering = () => {
+      if (!video.paused || shouldAutoPlayRef.current) {
+        setIsBuffering(true);
+      }
+    };
+    const hideBufferingAndApplySubtitles = () => {
+      setIsBuffering(false);
+      applyCurrentSubtitleOffset();
     };
     const ensurePlaybackFromLoadedData = () => ensurePlayback("loadeddata");
     const ensurePlaybackFromCanPlay = () => ensurePlayback("canplay");
+    const applyResumeFromMetadata = () => applyInitialResumePosition();
 
+    video.addEventListener("loadstart", showBuffering);
     video.addEventListener("play", updatePlaying);
     video.addEventListener("pause", updatePlaying);
     video.addEventListener("timeupdate", updateTime);
     video.addEventListener("durationchange", updateTime);
+    video.addEventListener("loadedmetadata", applyResumeFromMetadata);
+    video.addEventListener("loadeddata", hideBufferingAndApplySubtitles);
+    video.addEventListener("canplay", hideBufferingAndApplySubtitles);
+    video.addEventListener("seeked", hideBufferingAndApplySubtitles);
     video.addEventListener("loadeddata", ensurePlaybackFromLoadedData);
     video.addEventListener("canplay", ensurePlaybackFromCanPlay);
-    video.addEventListener("seeking", cancelActiveSubtitleLoadForSeek);
+    video.addEventListener("seeking", showBuffering);
     video.addEventListener("error", reportVideoError);
     video.addEventListener("waiting", reportVideoWaiting);
     video.addEventListener("playing", reportVideoPlaying);
@@ -402,6 +587,10 @@ export function VideoPlayer({ channel, onClose, onGatewaySessionChange }: VideoP
 
     return () => {
       isDisposed = true;
+      reportWatchProgress(video.currentTime || 0, isGatewayPlayback
+        ? gatewayOffsetRef.current + (Number.isFinite(video.duration) ? video.duration : 0)
+        : Number.isFinite(video.duration) ? video.duration : knownTimelineDuration,
+      true);
       hls?.destroy();
       hlsRef.current = null;
       cancelActiveSubtitleLoad();
@@ -410,21 +599,70 @@ export function VideoPlayer({ channel, onClose, onGatewaySessionChange }: VideoP
       video.removeEventListener("pause", updatePlaying);
       video.removeEventListener("timeupdate", updateTime);
       video.removeEventListener("durationchange", updateTime);
+      video.removeEventListener("loadedmetadata", applyResumeFromMetadata);
+      video.removeEventListener("loadstart", showBuffering);
+      video.removeEventListener("loadeddata", hideBufferingAndApplySubtitles);
+      video.removeEventListener("canplay", hideBufferingAndApplySubtitles);
+      video.removeEventListener("seeked", hideBufferingAndApplySubtitles);
       video.removeEventListener("loadeddata", ensurePlaybackFromLoadedData);
       video.removeEventListener("canplay", ensurePlaybackFromCanPlay);
-      video.removeEventListener("seeking", cancelActiveSubtitleLoadForSeek);
+      video.removeEventListener("seeking", showBuffering);
       video.removeEventListener("error", reportVideoError);
       video.removeEventListener("waiting", reportVideoWaiting);
       video.removeEventListener("playing", reportVideoPlaying);
       video.removeEventListener("stalled", reportVideoStalled);
       nativeAudioTracks?.removeEventListener("addtrack", refreshNativeAudioTracks);
       nativeAudioTracks?.removeEventListener("change", refreshNativeAudioTracks);
-      video.textTracks?.removeEventListener("addtrack", refreshNativeSubtitleTracks);
-      video.textTracks?.removeEventListener("change", refreshNativeSubtitleTracks);
+      video.textTracks?.removeEventListener("addtrack", refreshNativeSubtitleTracksAndOffset);
+      video.textTracks?.removeEventListener("change", refreshNativeSubtitleTracksAndOffset);
       video.removeAttribute("src");
       video.load();
     };
-  }, [activeSourceUrl, channel.contentType, channel.subtitleTracks, isGatewayPlayback]);
+  }, [activeSourceUrl, channel.contentType, channel.durationSeconds, channel.resumePositionSeconds, channel.subtitleTracks, isGatewayPlayback]);
+
+  function reportWatchProgress(
+    localPositionSeconds = videoRef.current?.currentTime || 0,
+    durationSeconds = knownTimelineDuration,
+    force = false,
+  ) {
+    const progressHandler = onProgressRef.current;
+    if (!progressHandler || channel.contentType === "live") {
+      return;
+    }
+
+    const now = Date.now();
+    if (!force && now - lastProgressReportAtRef.current < progressReportIntervalMs) {
+      return;
+    }
+
+    lastProgressReportAtRef.current = now;
+    const absolutePosition = isGatewayPlayback
+      ? gatewayOffsetRef.current + localPositionSeconds
+      : localPositionSeconds;
+    progressHandler(absolutePosition, durationSeconds || channel.durationSeconds || 0);
+  }
+
+  function applyInitialResumePosition() {
+    const video = videoRef.current;
+    const resumePosition = channel.resumePositionSeconds ?? 0;
+    if (!video || isGatewayPlayback || hasAppliedResumePositionRef.current || resumePosition <= 0) {
+      return;
+    }
+
+    const durationLimit = getTimelineDurationLimit(video.duration, channel.durationSeconds, knownTimelineDuration);
+    if (durationLimit > 0 && resumePosition >= durationLimit - 20) {
+      hasAppliedResumePositionRef.current = true;
+      return;
+    }
+
+    hasAppliedResumePositionRef.current = true;
+    video.currentTime = resumePosition;
+  }
+
+  function closePlayer() {
+    reportWatchProgress(videoRef.current?.currentTime || 0, knownTimelineDuration, true);
+    onClose();
+  }
 
   function togglePlayback() {
     const video = videoRef.current;
@@ -437,6 +675,7 @@ export function VideoPlayer({ channel, onClose, onGatewaySessionChange }: VideoP
       void video.play();
     } else {
       shouldAutoPlayRef.current = false;
+      setIsBuffering(false);
       video.pause();
     }
   }
@@ -485,9 +724,12 @@ export function VideoPlayer({ channel, onClose, onGatewaySessionChange }: VideoP
       return;
     }
 
-    const targetTime = clamp(value, 0, channel.durationSeconds ?? Math.max(value, 0));
-    shouldRestoreGatewaySubtitleRef.current = selectedSubtitleTrackRef.current !== subtitlesOff;
+    const targetTime = clamp(value, 0, getTimelineDurationLimit(channel.durationSeconds, knownTimelineDuration, value));
+    const subtitleTrackToRestore = selectedSubtitleTrackRef.current;
+    shouldRestoreGatewaySubtitleRef.current = subtitleTrackToRestore !== subtitlesOff;
+    subtitleTrackToRestoreRef.current = subtitleTrackToRestore;
     shouldAutoPlayRef.current = true;
+    setIsBuffering(true);
     setSubtitleProbeMessage(`Hoppar till ${formatTime(targetTime)}...`);
 
     try {
@@ -509,6 +751,8 @@ export function VideoPlayer({ channel, onClose, onGatewaySessionChange }: VideoP
         sourceUrl,
         channel.gatewaySubtitleLanguage ?? "swe",
         targetTime,
+        gatewayAudioTrackIndexRef.current,
+        gatewaySubtitleTrackIndexRef.current,
       );
       activeGatewaySessionRef.current = gateway.sessionId;
       const nextOffset = gateway.startAtSeconds ?? targetTime;
@@ -520,6 +764,8 @@ export function VideoPlayer({ channel, onClose, onGatewaySessionChange }: VideoP
         sessionId: gateway.sessionId,
         playlistUrl: gateway.playlistUrl,
         startAtSeconds: nextOffset,
+        audioTrackIndex: gatewayAudioTrackIndexRef.current,
+        subtitleTrackIndex: gatewaySubtitleTrackIndexRef.current,
       });
       setActiveSourceUrl(gateway.playlistUrl);
     } catch (error) {
@@ -533,6 +779,15 @@ export function VideoPlayer({ channel, onClose, onGatewaySessionChange }: VideoP
     setSelectedAudioTrack(value);
     const parsedTrack = parseTrackValue(value);
     if (!parsedTrack) {
+      return;
+    }
+
+    if (parsedTrack.source === "gateway") {
+      gatewayAudioTrackIndexRef.current = parsedTrack.id;
+      if (isGatewayPlayback) {
+        const targetTime = gatewayOffsetRef.current + (videoRef.current?.currentTime || 0);
+        void restartGatewayAt(targetTime);
+      }
       return;
     }
 
@@ -553,7 +808,44 @@ export function VideoPlayer({ channel, onClose, onGatewaySessionChange }: VideoP
     }
   }
 
+  async function loadGatewayAudioTracks(sourceUrl: string) {
+    if (!import.meta.env.DEV) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/subtitles/probe?url=${encodeURIComponent(sourceUrl)}`);
+      if (!response.ok) {
+        return;
+      }
+
+      const probe = (await response.json()) as MediaTrackProbeResponse;
+      const tracks = (probe.audioTracks ?? []).map((track, index) => {
+        const audioTrackIndex = track.audioTrackIndex ?? index;
+        return {
+          value: makeTrackValue("gateway", audioTrackIndex),
+          source: "gateway" as const,
+          id: audioTrackIndex,
+          label: track.label || track.language || `Audio ${index + 1}`,
+          language: track.language,
+        };
+      });
+      if (tracks.length <= 1) {
+        return;
+      }
+
+      isUsingGatewayAudioTracksRef.current = true;
+      setAudioTracks(tracks);
+      const selected = tracks.find((track) => track.id === gatewayAudioTrackIndexRef.current) ?? tracks[0];
+      gatewayAudioTrackIndexRef.current = selected.id;
+      setSelectedAudioTrack(selected.value);
+    } catch (error) {
+      console.warn("[player] Gateway audio probe failed", error);
+    }
+  }
+
   function selectSubtitleTrack(value: string) {
+    const previousGatewaySubtitleTrackIndex = gatewaySubtitleTrackIndexRef.current;
     selectedSubtitleTrackRef.current = value;
     setSelectedSubtitleTrack(value);
     const hls = hlsRef.current;
@@ -564,11 +856,20 @@ export function VideoPlayer({ channel, onClose, onGatewaySessionChange }: VideoP
 
     if (value === subtitlesOff) {
       cancelActiveSubtitleLoad();
+      gatewaySubtitleTrackIndexRef.current = -1;
       if (hls) {
         hls.subtitleDisplay = false;
         hls.subtitleTrack = -1;
       }
       syncNativeSubtitleModes(video, -1);
+      activeOverlaySubtitleCuesRef.current = [];
+      overlaySubtitleIndexRef.current = -1;
+      setOverlaySubtitleTextIfChanged("");
+      if (isGatewayPlayback && previousGatewaySubtitleTrackIndex >= 0) {
+        const targetTime = gatewayOffsetRef.current + (video.currentTime || 0);
+        setSubtitleProbeMessage("Stanger av undertext...");
+        void restartGatewayAt(targetTime);
+      }
       return;
     }
 
@@ -577,7 +878,23 @@ export function VideoPlayer({ channel, onClose, onGatewaySessionChange }: VideoP
       return;
     }
 
+    if (parsedTrack.source === "gateway-subtitle") {
+      cancelActiveSubtitleLoad();
+      gatewaySubtitleTrackIndexRef.current = parsedTrack.id;
+      activeOverlaySubtitleCuesRef.current = [];
+      overlaySubtitleIndexRef.current = -1;
+      setOverlaySubtitleTextIfChanged("");
+      if (isGatewayPlayback) {
+        const targetTime = gatewayOffsetRef.current + (video.currentTime || 0);
+        setSubtitleProbeMessage("Byter undertext...");
+        void restartGatewayAt(targetTime);
+      }
+      return;
+    }
+
     if (parsedTrack.source === "hls" && hls) {
+      activeOverlaySubtitleCuesRef.current = [];
+      setOverlaySubtitleTextIfChanged("");
       hls.subtitleDisplay = true;
       hls.subtitleTrack = parsedTrack.id;
       syncNativeSubtitleModes(video, parsedTrack.id);
@@ -595,6 +912,7 @@ export function VideoPlayer({ channel, onClose, onGatewaySessionChange }: VideoP
         hls.subtitleDisplay = false;
         hls.subtitleTrack = -1;
       }
+      syncNativeSubtitleModes(video, -1);
       cancelActiveSubtitleLoad();
       setSubtitleProbeMessage(`Laddar ${externalTrack.label}...`);
       void loadAndShowExternalSubtitleTrack(externalTrack, value);
@@ -602,6 +920,8 @@ export function VideoPlayer({ channel, onClose, onGatewaySessionChange }: VideoP
     }
 
     if (parsedTrack.source === "native") {
+      activeOverlaySubtitleCuesRef.current = [];
+      setOverlaySubtitleTextIfChanged("");
       if (hls) {
         hls.subtitleDisplay = true;
       }
@@ -616,9 +936,9 @@ export function VideoPlayer({ channel, onClose, onGatewaySessionChange }: VideoP
       return;
     }
 
-    const loadedTrack = loadedExternalSubtitlesRef.current.get(track.value);
-    if (loadedTrack) {
-      showExternalSubtitleTrack(video, loadedTrack.element);
+    const loadedCues = loadedExternalSubtitlesRef.current.get(track.value);
+    if (loadedCues) {
+      showOverlaySubtitleTrack(loadedCues);
       setSubtitleProbeMessage("");
       return;
     }
@@ -629,35 +949,19 @@ export function VideoPlayer({ channel, onClose, onGatewaySessionChange }: VideoP
     const expectedChannelUrl = activeChannelUrlRef.current;
     try {
       const content = await fetchText(track.url, abortController.signal);
-      const subtitleBlobUrl = URL.createObjectURL(
-        new Blob([toWebVtt(content)], { type: "text/vtt" }),
-      );
+      const cues = parseSubtitleCues(content);
 
       if (
         activeChannelUrlRef.current !== expectedChannelUrl
         || selectedSubtitleTrackRef.current !== expectedSelection
         || !videoRef.current
       ) {
-        URL.revokeObjectURL(subtitleBlobUrl);
         return;
       }
 
-      const trackElement = document.createElement("track");
-      trackElement.kind = "subtitles";
-      trackElement.label = track.label;
-      if (track.language) {
-        trackElement.srclang = track.language;
-      }
-      trackElement.addEventListener("load", () => applyCurrentSubtitleOffset(), { once: true });
-      trackElement.src = subtitleBlobUrl;
-      videoRef.current.appendChild(trackElement);
-      loadedExternalSubtitlesRef.current.set(track.value, {
-        element: trackElement,
-        objectUrl: subtitleBlobUrl,
-      });
-      showExternalSubtitleTrack(videoRef.current, trackElement);
-      applyCurrentSubtitleOffset();
-      setSubtitleProbeMessage("");
+      loadedExternalSubtitlesRef.current.set(track.value, cues);
+      showOverlaySubtitleTrack(cues);
+      setSubtitleProbeMessage(cues.length > 0 ? "" : "Inga rader hittades i undertexten.");
     } catch (error) {
       if (isAbortError(error)) {
         return;
@@ -686,29 +990,62 @@ export function VideoPlayer({ channel, onClose, onGatewaySessionChange }: VideoP
     }
   }
 
-  function cancelActiveSubtitleLoadForSeek() {
-    if (!activeSubtitleLoadAbortRef.current) {
+  function clearLoadedExternalSubtitles() {
+    loadedExternalSubtitlesRef.current.clear();
+    activeOverlaySubtitleCuesRef.current = [];
+    overlaySubtitleIndexRef.current = -1;
+    setOverlaySubtitleTextIfChanged("");
+  }
+
+  function showOverlaySubtitleTrack(cues: SubtitleCue[]) {
+    activeOverlaySubtitleCuesRef.current = cues;
+    overlaySubtitleIndexRef.current = -1;
+    updateOverlaySubtitle();
+    startOverlaySubtitleLoop();
+  }
+
+  function startOverlaySubtitleLoop() {
+    stopOverlaySubtitleLoop();
+    function tick() {
+      updateOverlaySubtitle();
+      overlaySubtitleFrameRef.current = window.requestAnimationFrame(tick);
+    }
+
+    overlaySubtitleFrameRef.current = window.requestAnimationFrame(tick);
+  }
+
+  function stopOverlaySubtitleLoop() {
+    if (overlaySubtitleFrameRef.current) {
+      window.cancelAnimationFrame(overlaySubtitleFrameRef.current);
+      overlaySubtitleFrameRef.current = undefined;
+    }
+  }
+
+  function updateOverlaySubtitle() {
+    const video = videoRef.current;
+    const cues = activeOverlaySubtitleCuesRef.current;
+    if (!video || cues.length === 0) {
+      setOverlaySubtitleTextIfChanged("");
       return;
     }
 
-    selectedSubtitleTrackRef.current = subtitlesOff;
-    setSelectedSubtitleTrack(subtitlesOff);
-    if (videoRef.current) {
-      syncNativeSubtitleModes(videoRef.current, -1);
-    }
-    cancelActiveSubtitleLoad("Undertextsladdning avbruten vid spolning. Valj text igen nar filmen spelar.");
+    const subtitleTime = (isGatewayPlayback ? gatewayOffsetRef.current : 0) + (video.currentTime || 0) + subtitleOffsetRef.current;
+    const cueIndex = findSubtitleCueIndex(cues, subtitleTime, overlaySubtitleIndexRef.current);
+    overlaySubtitleIndexRef.current = cueIndex;
+    setOverlaySubtitleTextIfChanged(cueIndex >= 0 ? cues[cueIndex].text : "");
   }
 
-  function clearLoadedExternalSubtitles() {
-    loadedExternalSubtitlesRef.current.forEach((track) => {
-      track.element.remove();
-      URL.revokeObjectURL(track.objectUrl);
-    });
-    loadedExternalSubtitlesRef.current.clear();
+  function setOverlaySubtitleTextIfChanged(value: string) {
+    if (overlaySubtitleTextRef.current === value) {
+      return;
+    }
+
+    overlaySubtitleTextRef.current = value;
+    setOverlaySubtitleText(value);
   }
 
   function toggleFullscreen() {
-    const host = videoRef.current?.parentElement;
+    const host = videoRef.current?.closest(".player-screen");
     if (!host) {
       return;
     }
@@ -739,7 +1076,17 @@ export function VideoPlayer({ channel, onClose, onGatewaySessionChange }: VideoP
       return;
     }
 
-    applySubtitleOffset(video, subtitleOffsetRef.current, subtitleCueOffsetsRef.current);
+    applySubtitleOffset(video, subtitleOffsetRef.current, originalSubtitleCueTimesRef.current);
+    applySubtitleControlLift();
+  }
+
+  function applySubtitleControlLift() {
+    const video = videoRef.current;
+    if (!video) {
+      return;
+    }
+
+    applySubtitleLineLift(video, isUiVisible, originalSubtitleCueLinesRef.current);
   }
 
   function revealPlayerUi() {
@@ -748,31 +1095,67 @@ export function VideoPlayer({ channel, onClose, onGatewaySessionChange }: VideoP
       window.clearTimeout(uiHideTimeoutRef.current);
     }
 
+    if (trackPicker || isPointerOverPlayerChromeRef.current) {
+      return;
+    }
+
+    uiHideTimeoutRef.current = window.setTimeout(() => {
+      setIsUiVisible(false);
+    }, uiAutoHideMs);
+  }
+
+  function keepPlayerChromeVisible() {
+    isPointerOverPlayerChromeRef.current = true;
+    setIsUiVisible(true);
+    if (uiHideTimeoutRef.current) {
+      window.clearTimeout(uiHideTimeoutRef.current);
+      uiHideTimeoutRef.current = undefined;
+    }
+  }
+
+  function releasePlayerChromeHover() {
+    isPointerOverPlayerChromeRef.current = false;
+    revealPlayerUi();
+  }
+
+  function closeTrackPickerAndResumeAutoHide() {
+    setTrackPicker(undefined);
+    isPointerOverPlayerChromeRef.current = false;
+    setIsUiVisible(true);
+    if (uiHideTimeoutRef.current) {
+      window.clearTimeout(uiHideTimeoutRef.current);
+    }
     uiHideTimeoutRef.current = window.setTimeout(() => {
       setIsUiVisible(false);
     }, uiAutoHideMs);
   }
 
   const timelineDuration = isGatewayPlayback
-    ? channel.durationSeconds ?? gatewayOffset + duration
+    ? getTimelineDurationLimit(channel.durationSeconds, knownTimelineDuration, gatewayOffset + duration)
     : duration;
   const displayCurrentTime = isGatewayPlayback ? gatewayOffset + currentTime : currentTime;
   const timelineValue = scrubTime ?? displayCurrentTime;
   const canSeek = timelineDuration > 0;
   const hasAudioChoices = audioTracks.length > 1;
-  const subtitleTracks = [...mediaSubtitleTracks, ...externalSubtitleTracks];
+  const subtitleTracks = [...externalSubtitleTracks, ...mediaSubtitleTracks];
   const hasSubtitleChoices = subtitleTracks.length > 0;
+  const subtitleTrackOptions = [
+    { value: subtitlesOff, source: "native" as const, id: -1, label: "Undertexter av" },
+    ...subtitleTracks,
+  ];
   const shouldShowSubtitleProbeMessage = import.meta.env.DEV && Boolean(subtitleProbeMessage);
   const subtitleOffsetLabel = `${subtitleOffsetSeconds > 0 ? "+" : ""}${subtitleOffsetSeconds.toFixed(1)}s`;
+  const showBufferingOverlay = isBuffering && shouldAutoPlayRef.current;
+  const effectiveUiVisible = isUiVisible || Boolean(trackPicker);
 
   return (
     <div
-      className={`player-screen ${isUiVisible ? "ui-visible" : "ui-hidden"}`}
+      className={`player-screen ${effectiveUiVisible ? "ui-visible" : "ui-hidden"}`}
       onPointerMove={revealPlayerUi}
       onTouchStart={revealPlayerUi}
     >
       <div className="player-topbar">
-        <button className="icon-text-button" onClick={onClose} autoFocus>
+        <button className="icon-text-button" onClick={closePlayer} autoFocus>
           <ArrowLeft size={20} />
           Tillbaka
         </button>
@@ -783,57 +1166,98 @@ export function VideoPlayer({ channel, onClose, onGatewaySessionChange }: VideoP
       </div>
 
       <div className="video-stage">
-        <video ref={videoRef} className="video-player" playsInline autoPlay preload="auto" />
-        <div className="player-controls">
-          <button className="round-control-button" onClick={togglePlayback} aria-label={isPlaying ? "Pausa" : "Spela"}>
-            {isPlaying ? <Pause size={22} fill="currentColor" /> : <Play size={22} fill="currentColor" />}
-          </button>
+        <video
+          ref={videoRef}
+          className="video-player"
+          playsInline
+          autoPlay
+          preload="auto"
+          onClick={togglePlayback}
+        />
+        {showBufferingOverlay ? (
+          <div className="player-buffering" role="status" aria-live="polite">
+            <LoadingSpinner />
+            <span>Buffrar...</span>
+          </div>
+        ) : null}
+        {overlaySubtitleText ? (
+          <div className={`subtitle-overlay ${effectiveUiVisible ? "controls-visible" : ""}`}>
+            {overlaySubtitleText}
+          </div>
+        ) : null}
+        {trackPicker === "audio" ? (
+          <TrackPickerPanel
+            icon={<Volume2 size={24} />}
+            title="Audio"
+            options={audioTracks}
+            selectedValue={selectedAudioTrack}
+            onSelect={(value) => {
+              selectAudioTrack(value);
+              closeTrackPickerAndResumeAutoHide();
+            }}
+            onClose={closeTrackPickerAndResumeAutoHide}
+            onPointerEnter={keepPlayerChromeVisible}
+            onPointerLeave={releasePlayerChromeHover}
+          />
+        ) : null}
+        {trackPicker === "subtitle" ? (
+          <TrackPickerPanel
+            icon={<Captions size={24} />}
+            title="Subtitle"
+            options={subtitleTrackOptions}
+            selectedValue={selectedSubtitleTrack}
+            columns={subtitleTrackOptions.length > 7 ? 2 : 1}
+            onSelect={(value) => {
+              selectSubtitleTrack(value);
+              closeTrackPickerAndResumeAutoHide();
+            }}
+            onClose={closeTrackPickerAndResumeAutoHide}
+            onPointerEnter={keepPlayerChromeVisible}
+            onPointerLeave={releasePlayerChromeHover}
+          />
+        ) : null}
+        <div
+          className="player-controls"
+          onPointerEnter={keepPlayerChromeVisible}
+          onPointerLeave={releasePlayerChromeHover}
+        >
+          <div className="player-timeline-row">
+            <button className="round-control-button" onClick={togglePlayback} aria-label={isPlaying ? "Pausa" : "Spela"}>
+              {isPlaying ? <Pause size={22} fill="currentColor" /> : <Play size={22} fill="currentColor" />}
+            </button>
 
-          <div className="time-stack">
-            <input
-              type="range"
-              min={0}
-              max={Math.max(0, timelineDuration)}
-              step={0.25}
-              value={Math.min(timelineValue, timelineDuration || timelineValue)}
-              disabled={!canSeek}
-              onChange={(event) => updateScrub(Number(event.target.value))}
-              onPointerUp={commitScrub}
-              onTouchEnd={commitScrub}
-              onBlur={commitScrub}
-              onKeyUp={commitScrub}
-            />
-            <span>{formatTime(timelineValue)} / {canSeek ? formatTime(timelineDuration) : "--:--"}</span>
+            <div className="time-stack">
+              <input
+                type="range"
+                min={0}
+                max={Math.max(0, timelineDuration)}
+                step={0.25}
+                value={Math.min(timelineValue, timelineDuration || timelineValue)}
+                disabled={!canSeek}
+                onChange={(event) => updateScrub(Number(event.target.value))}
+                onPointerUp={commitScrub}
+                onTouchEnd={commitScrub}
+                onBlur={commitScrub}
+                onKeyUp={commitScrub}
+              />
+              <span>{formatTime(timelineValue)} / {canSeek ? formatTime(timelineDuration) : "--:--"}</span>
+            </div>
           </div>
 
-          {hasAudioChoices ? (
-            <label className="track-select-label">
-              <Volume2 size={17} />
-              <select
-                value={selectedAudioTrack}
-                onChange={(event) => selectAudioTrack(event.target.value)}
-              >
-                {audioTracks.map((track) => (
-                  <option value={track.value} key={track.value}>{track.label}</option>
-                ))}
-              </select>
-            </label>
-          ) : null}
+          <div className="player-tools-row">
+            {hasAudioChoices ? (
+              <button className="icon-text-button track-picker-button" onClick={() => setTrackPicker("audio")}>
+                <Volume2 size={17} />
+                Audio
+              </button>
+            ) : null}
 
-          {hasSubtitleChoices ? (
-            <label className="track-select-label">
-              <Captions size={17} />
-              <select
-                value={selectedSubtitleTrack}
-                onChange={(event) => selectSubtitleTrack(event.target.value)}
-              >
-                <option value={subtitlesOff}>Undertexter av</option>
-                {subtitleTracks.map((track) => (
-                  <option value={track.value} key={track.value}>{track.label}</option>
-                ))}
-              </select>
-            </label>
-          ) : null}
+            {hasSubtitleChoices ? (
+              <button className="icon-text-button track-picker-button" onClick={() => setTrackPicker("subtitle")}>
+                <Captions size={17} />
+                Subtitle
+              </button>
+            ) : null}
 
           {hasSubtitleChoices ? (
             <div className="subtitle-offset-controls" aria-label="Förskjut undertexter">
@@ -851,17 +1275,119 @@ export function VideoPlayer({ channel, onClose, onGatewaySessionChange }: VideoP
             </div>
           ) : null}
 
-          {shouldShowSubtitleProbeMessage ? (
-            <span className="track-status-label">{subtitleProbeMessage}</span>
-          ) : null}
+            {shouldShowSubtitleProbeMessage ? (
+              <span className="track-status-label">{subtitleProbeMessage}</span>
+            ) : null}
 
-          <button className="round-control-button" onClick={toggleFullscreen} aria-label="Fullscreen">
-            <Maximize size={20} />
-          </button>
+            <button className="round-control-button" onClick={toggleFullscreen} aria-label="Fullscreen">
+              <Maximize size={20} />
+            </button>
+          </div>
         </div>
       </div>
     </div>
   );
+}
+
+function TrackPickerPanel({
+  icon,
+  title,
+  options,
+  selectedValue,
+  columns = 1,
+  onSelect,
+  onClose,
+  onPointerEnter,
+  onPointerLeave,
+}: {
+  icon: ReactNode;
+  title: string;
+  options: TrackOption[];
+  selectedValue: string;
+  columns?: 1 | 2;
+  onSelect: (value: string) => void;
+  onClose: () => void;
+  onPointerEnter: () => void;
+  onPointerLeave: () => void;
+}) {
+  const panelRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const buttons = getTrackPickerButtons(panelRef.current);
+    const selectedButton = buttons.find((button) => button.dataset.value === selectedValue);
+    (selectedButton ?? buttons[0])?.focus();
+  }, [selectedValue]);
+
+  function onPanelKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (event.key === "Escape" || event.key === "Backspace") {
+      event.preventDefault();
+      onClose();
+      return;
+    }
+
+    if (!["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(event.key)) {
+      return;
+    }
+
+    const buttons = getTrackPickerButtons(panelRef.current);
+    const currentIndex = buttons.findIndex((button) => button === document.activeElement);
+    if (currentIndex < 0) {
+      buttons[0]?.focus();
+      event.preventDefault();
+      return;
+    }
+
+    const columnCount = columns === 2 ? 2 : 1;
+    const delta = event.key === "ArrowDown"
+      ? columnCount
+      : event.key === "ArrowUp"
+        ? -columnCount
+        : event.key === "ArrowRight"
+          ? 1
+          : -1;
+    const nextIndex = clamp(currentIndex + delta, 0, buttons.length - 1);
+    buttons[nextIndex]?.focus();
+    event.preventDefault();
+  }
+
+  return (
+    <div className="track-picker-backdrop" onClick={onClose}>
+      <section
+        className="track-picker-panel"
+        ref={panelRef}
+        aria-label={title}
+        onClick={(event) => event.stopPropagation()}
+        onKeyDown={onPanelKeyDown}
+        onPointerEnter={onPointerEnter}
+        onPointerLeave={onPointerLeave}
+      >
+        <div className="track-picker-title">
+          {icon}
+          <h2>{title}</h2>
+        </div>
+        <div className={`track-picker-list ${columns === 2 ? "two-columns" : ""}`}>
+          {options.map((option) => {
+            const isSelected = option.value === selectedValue;
+            return (
+              <button
+                className={`track-picker-option ${isSelected ? "selected" : ""}`}
+                data-value={option.value}
+                key={option.value}
+                onClick={() => onSelect(option.value)}
+              >
+                <span>{option.label}</span>
+                {isSelected ? <small>Vald</small> : null}
+              </button>
+            );
+          })}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function getTrackPickerButtons(panel: HTMLDivElement | null) {
+  return Array.from(panel?.querySelectorAll<HTMLButtonElement>(".track-picker-option") ?? []);
 }
 
 function formatTime(seconds: number) {
@@ -886,10 +1412,99 @@ function delay(ms: number) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
+function getTimelineDurationLimit(...values: Array<number | undefined>) {
+  return values
+    .filter((value): value is number => typeof value === "number" && Number.isFinite(value) && value > 0)
+    .reduce((max, value) => Math.max(max, value), 0);
+}
+
+function findSubtitleCueIndex(cues: SubtitleCue[], time: number, currentIndex: number) {
+  const currentCue = cues[currentIndex];
+  if (currentCue && time >= currentCue.startTime && time <= currentCue.endTime) {
+    return currentIndex;
+  }
+
+  const nextCue = cues[currentIndex + 1];
+  if (nextCue && time >= nextCue.startTime && time <= nextCue.endTime) {
+    return currentIndex + 1;
+  }
+
+  let low = 0;
+  let high = cues.length - 1;
+  while (low <= high) {
+    const middle = Math.floor((low + high) / 2);
+    const cue = cues[middle];
+    if (time < cue.startTime) {
+      high = middle - 1;
+    } else if (time > cue.endTime) {
+      low = middle + 1;
+    } else {
+      return middle;
+    }
+  }
+
+  return -1;
+}
+
+function parseSubtitleCues(content: string) {
+  const normalized = content
+    .replace(/^\uFEFF/, "")
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .trim();
+  if (!normalized) {
+    return [];
+  }
+
+  return normalized
+    .split(/\n{2,}/)
+    .map(parseSubtitleBlock)
+    .filter((cue): cue is SubtitleCue => Boolean(cue))
+    .sort((left, right) => left.startTime - right.startTime);
+}
+
+function parseSubtitleBlock(block: string): SubtitleCue | undefined {
+  const lines = block
+    .split("\n")
+    .map((line) => line.trimEnd())
+    .filter((line) => line.trim() && !/^WEBVTT\b/i.test(line.trim()) && !/^NOTE\b/i.test(line.trim()));
+  const timingIndex = lines.findIndex((line) => line.includes("-->"));
+  if (timingIndex < 0) {
+    return undefined;
+  }
+
+  const [rawStart, rawEnd] = lines[timingIndex].split("-->");
+  const startTime = parseSubtitleTimestamp(rawStart);
+  const endTime = parseSubtitleTimestamp(rawEnd);
+  const text = lines
+    .slice(timingIndex + 1)
+    .map((line) => line.replace(/<[^>]*>/g, "").trim())
+    .filter(Boolean)
+    .join("\n");
+  if (!Number.isFinite(startTime) || !Number.isFinite(endTime) || endTime <= startTime || !text) {
+    return undefined;
+  }
+
+  return { startTime, endTime, text };
+}
+
+function parseSubtitleTimestamp(value: string) {
+  const match = value.trim().match(/(?:(\d+):)?(\d{2}):(\d{2})[,.](\d{1,3})/);
+  if (!match) {
+    return Number.NaN;
+  }
+
+  const hours = Number(match[1] ?? 0);
+  const minutes = Number(match[2]);
+  const seconds = Number(match[3]);
+  const milliseconds = Number(match[4].padEnd(3, "0"));
+  return (hours * 3600) + (minutes * 60) + seconds + (milliseconds / 1000);
+}
+
 function applySubtitleOffset(
   video: HTMLVideoElement,
   offsetSeconds: number,
-  appliedOffsets: WeakMap<TextTrackCue, number>,
+  originalCueTimes: WeakMap<TextTrackCue, OriginalTextTrackCueTime>,
 ) {
   Array.from(video.textTracks ?? []).forEach((track) => {
     const cues = track.cues;
@@ -899,19 +1514,62 @@ function applySubtitleOffset(
 
     for (let index = 0; index < cues.length; index += 1) {
       const cue = cues[index] as MutableTextTrackCue;
-      const appliedOffset = appliedOffsets.get(cue) ?? 0;
-      const delta = offsetSeconds - appliedOffset;
-      if (Math.abs(delta) < 0.001) {
+      let originalTime = originalCueTimes.get(cue);
+      if (!originalTime) {
+        originalTime = {
+          startTime: cue.startTime,
+          endTime: cue.endTime,
+        };
+        originalCueTimes.set(cue, originalTime);
+      }
+
+      const nextStartTime = Math.max(0, originalTime.startTime + offsetSeconds);
+      const nextEndTime = Math.max(nextStartTime + 0.05, originalTime.endTime + offsetSeconds);
+      if (Math.abs(cue.startTime - nextStartTime) < 0.001 && Math.abs(cue.endTime - nextEndTime) < 0.001) {
         continue;
       }
 
-      const nextStartTime = Math.max(0, cue.startTime + delta);
-      const nextEndTime = Math.max(nextStartTime + 0.05, cue.endTime + delta);
       cue.startTime = nextStartTime;
       cue.endTime = nextEndTime;
-      appliedOffsets.set(cue, offsetSeconds);
     }
   });
+}
+
+function applySubtitleLineLift(
+  video: HTMLVideoElement,
+  shouldLift: boolean,
+  originalLines: WeakMap<TextTrackCue, PositionedTextTrackCue["line"]>,
+) {
+  Array.from(video.textTracks ?? []).forEach((track) => {
+    const cues = track.cues;
+    if (!cues) {
+      return;
+    }
+
+    for (let index = 0; index < cues.length; index += 1) {
+      const cue = cues[index];
+      if (!isPositionedTextTrackCue(cue)) {
+        continue;
+      }
+
+      if (!originalLines.has(cue)) {
+        originalLines.set(cue, cue.line);
+      }
+
+      const originalLine = originalLines.get(cue) ?? "auto";
+      if (shouldLift) {
+        cue.line = subtitleLineWithControlsVisible;
+      } else if (originalLine === "auto") {
+        cue.line = subtitleLineDefault;
+      } else {
+        cue.line = originalLine;
+      }
+    }
+  });
+}
+
+function isPositionedTextTrackCue(cue: TextTrackCue): cue is PositionedTextTrackCue {
+  return "line" in cue;
 }
 
 function makeTrackValue(source: TrackOption["source"], id: number) {
@@ -919,13 +1577,43 @@ function makeTrackValue(source: TrackOption["source"], id: number) {
 }
 
 function parseTrackValue(value: string): Pick<TrackOption, "source" | "id"> | undefined {
-  const [source, rawId] = value.split(":");
+  const separatorIndex = value.lastIndexOf(":");
+  const source = separatorIndex >= 0 ? value.slice(0, separatorIndex) : value;
+  const rawId = separatorIndex >= 0 ? value.slice(separatorIndex + 1) : "";
   const id = Number(rawId);
-  if ((source !== "hls" && source !== "native" && source !== "external") || !Number.isInteger(id)) {
+  if (
+    (
+      source !== "hls"
+      && source !== "native"
+      && source !== "external"
+      && source !== "gateway"
+      && source !== "gateway-subtitle"
+    )
+    || !Number.isInteger(id)
+  ) {
     return undefined;
   }
 
   return { source, id };
+}
+
+function getGatewaySubtitleTrackIndex(track: { id?: string; url?: string }) {
+  const idMatch = track.id?.match(/^embedded:(\d+)$/);
+  if (idMatch) {
+    return Number(idMatch[1]);
+  }
+
+  if (!track.url?.startsWith("/api/subtitles/extract")) {
+    return undefined;
+  }
+
+  try {
+    const url = new URL(track.url, window.location.origin);
+    const stream = Number(url.searchParams.get("stream"));
+    return Number.isInteger(stream) && stream >= 0 ? stream : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function getSelectableTextTracks(video: HTMLVideoElement) {
@@ -936,12 +1624,6 @@ function getSelectableTextTracks(video: HTMLVideoElement) {
 function syncNativeSubtitleModes(video: HTMLVideoElement, selectedIndex: number) {
   getSelectableTextTracks(video).forEach((track, index) => {
     track.mode = index === selectedIndex ? "showing" : "disabled";
-  });
-}
-
-function showExternalSubtitleTrack(video: HTMLVideoElement, selectedTrackElement: HTMLTrackElement) {
-  getSelectableTextTracks(video).forEach((track) => {
-    track.mode = track === selectedTrackElement.track ? "showing" : "disabled";
   });
 }
 
@@ -1082,22 +1764,4 @@ function describeMediaUrl(value: string) {
   } catch {
     return value.startsWith("/api/") ? value : "(media-url)";
   }
-}
-
-function toWebVtt(content: string) {
-  const normalized = content
-    .replace(/^\uFEFF/, "")
-    .replace(/\r\n/g, "\n")
-    .replace(/\r/g, "\n")
-    .trimStart();
-
-  if (/^WEBVTT/i.test(normalized)) {
-    return normalized;
-  }
-
-  const convertedTimings = normalized.replace(
-    /(\d{2}:\d{2}:\d{2}),(\d{3})/g,
-    "$1.$2",
-  );
-  return `WEBVTT\n\n${convertedTimings}`;
 }

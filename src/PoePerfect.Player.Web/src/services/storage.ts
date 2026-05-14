@@ -4,6 +4,7 @@ const sourceKey = "poeperfect.web.source";
 const favoriteKey = "poeperfect.web.favorites";
 const recentKey = "poeperfect.web.recent";
 const categoryPreferencesKey = "poeperfect.web.category-preferences";
+const watchProgressKey = "poeperfect.web.watch-progress";
 
 export function loadStoredSource() {
   return localStorage.getItem(sourceKey) ?? "";
@@ -38,6 +39,33 @@ export function rememberRecent(entry: RecentEntry) {
   ].slice(0, 120);
   localStorage.setItem(recentKey, JSON.stringify(next));
   return next;
+}
+
+export type WatchProgress = {
+  url: string;
+  positionSeconds: number;
+  durationSeconds: number;
+  updatedAt: number;
+};
+
+export function loadWatchProgress(url: string) {
+  return readJson<Record<string, WatchProgress>>(watchProgressKey, {})[url];
+}
+
+export function saveWatchProgress(progress: WatchProgress) {
+  const allProgress = readJson<Record<string, WatchProgress>>(watchProgressKey, {});
+  allProgress[progress.url] = progress;
+  localStorage.setItem(watchProgressKey, JSON.stringify(allProgress));
+}
+
+export function clearWatchProgress(url: string) {
+  const allProgress = readJson<Record<string, WatchProgress>>(watchProgressKey, {});
+  if (!(url in allProgress)) {
+    return;
+  }
+
+  delete allProgress[url];
+  localStorage.setItem(watchProgressKey, JSON.stringify(allProgress));
 }
 
 export function loadCategoryPreferences(): CategoryPreferences {
