@@ -54,16 +54,18 @@ The main working product today is the Windows desktop app. A browser-based Web v
 - M3U/Xtream source loading
 - playlist page for loading sources and sorting/hiding undercategories
 - Windows-inspired start page with Live, Film, and Serier
-- category browser with latest-added, favorites, recent playback, and search
-- movie detail view with poster, metadata, description, rating, cast, play, and heart favorite toggle
+- TV-style category browser with latest-added, favorites, recent playback, debounced search, cleaned titles, metadata chips, and poster placeholders
+- movie detail view with cleaned title, metadata chips, poster, description, rating, cast, play, resume prompt, and heart favorite toggle
 - series detail view with seasons and episodes
 - video player using browser playback plus `hls.js`
-- audio track and subtitle selectors in the player, shown only when selectable tracks exist
-- subtitle timing adjustment controls in the player
-- auto-hiding player chrome while the mouse is idle
-- local dev gateway for MKV playback with embedded Swedish subtitle conversion to HLS/WebVTT
-- local browser storage for source, favorites, recent playback, and category preferences
-- Vite dev proxy for catalog/API loading, gateway playback, and player logging during local testing
+- TV-style audio and subtitle picker panels in the player, shown only when selectable tracks exist
+- embedded MKV audio/subtitle discovery in dev mode through local `ffprobe`
+- subtitle timing adjustment controls and configurable bottom placement behavior around controls
+- auto-hiding player chrome/topbar while the pointer is idle, with click-to-play/pause on the video surface
+- loading/buffering spinner for catalog, details, player start, seek, and gateway restarts
+- local dev gateway for MKV playback with selectable audio/subtitle streams converted to HLS/WebVTT
+- local browser storage for source, favorites, recent playback, watch progress, and category preferences
+- Vite dev proxy for catalog/API loading, gateway playback, subtitle probing/extraction diagnostics, and player logging during local testing
 - intended as the base for a future webOS/TV package
 
 ### Android
@@ -137,9 +139,10 @@ During `npm run dev`, the Web app also exposes local-only helper routes:
 
 - `/api/proxy` for playlist/catalog/API requests that need a browser-safe proxy
 - `/api/gateway/*` for MKV gateway testing through local `ffmpeg`
+- `/api/subtitles/*` for local `ffprobe` media-track discovery and subtitle diagnostics
 - `/api/client-log` for player diagnostics in the Vite console
 
-The gateway is intended for local development. It starts one local `ffmpeg` session per active gateway playback, converts the selected MKV stream to browser-friendly HLS, and exposes embedded Swedish subtitles as an HLS subtitle track when available.
+The gateway is intended for local development. It starts one local `ffmpeg` session per active gateway playback, converts the selected MKV video/audio/subtitle stream to browser-friendly HLS, and restarts at the requested absolute position when the user seeks or switches embedded tracks.
 
 ### Android
 
@@ -196,6 +199,7 @@ The Web app uses browser local storage for:
 - saved source URL
 - favorites
 - recent playback
+- watch progress / continue watching
 - category visibility/order preferences
 
 These are runtime values and should not be committed to the repository.
@@ -229,6 +233,7 @@ Recommended screenshots to add next:
 - [Project history](./docs/poeperfect-player-history.md)
 - [Licensing handoff](./docs/licensing-handoff.md)
 - [Repository roadmap](./docs/repository-roadmap.md)
+- [Web/webOS player context](./docs/webos-player-context.md)
 - [Release checklist](./docs/release-checklist.md)
 - [Private repository notice](./LICENSE.md)
 
