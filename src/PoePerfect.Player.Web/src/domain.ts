@@ -16,9 +16,11 @@ export type Channel = {
   playlistIndex: number;
   subtitleTracks?: ExternalSubtitleTrack[];
   durationSeconds?: number;
+  resumePositionSeconds?: number;
   gatewaySessionId?: string;
   gatewayStartOffsetSeconds?: number;
   gatewaySubtitleLanguage?: string;
+  gatewaySubtitleTrackIndex?: number;
   originalUrl?: string;
 };
 

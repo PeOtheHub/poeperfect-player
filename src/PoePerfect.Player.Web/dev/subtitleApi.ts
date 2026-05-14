@@ -6,6 +6,8 @@ type ProbeStream = {
   index?: number;
   codec_name?: string;
   codec_type?: string;
+  channels?: number;
+  channel_layout?: string;
   tags?: Record<string, string>;
   disposition?: Record<string, number>;
 };
@@ -23,6 +25,19 @@ type SubtitleTrackInfo = {
   title: string;
   label: string;
   isDefault: boolean;
+};
+
+type AudioTrackInfo = {
+  audioTrackIndex: number;
+  streamIndex: number;
+  containerStreamIndex: number;
+  codec: string;
+  language: string;
+  title: string;
+  label: string;
+  isDefault: boolean;
+  channels?: number;
+  channelLayout?: string;
 };
 
 const probeTimeoutMs = 30_000;
@@ -65,8 +80,6 @@ async function handleProbeRequest(request: IncomingMessage, response: ServerResp
         "-print_format",
         "json",
         "-show_streams",
-        "-select_streams",
-        "s",
         targetUrl,
       ],
       probeTimeoutMs,
@@ -75,11 +88,13 @@ async function handleProbeRequest(request: IncomingMessage, response: ServerResp
     response.off("close", abortCommand);
     const probe = JSON.parse(result.stdout || "{}") as ProbeResult;
     const tracks = normalizeProbeStreams(probe.streams ?? []);
-    console.info(`[subtitles] probe found ${tracks.length} track(s)`);
+    const audioTracks = normalizeAudioProbeStreams(probe.streams ?? []);
+    console.info(`[subtitles] probe found ${tracks.length} subtitle track(s), ${audioTracks.length} audio track(s)`);
     writeJson(response, 200, {
       available: tracks.length > 0,
       extractor: "ffprobe",
       tracks,
+      audioTracks,
     });
   } catch (error) {
     if (isCommandCancelled(error) || response.destroyed) {
@@ -128,6 +143,8 @@ async function handleExtractRequest(request: IncomingMessage, response: ServerRe
         targetUrl,
         "-map",
         `0:s:${subtitleTrackIndex}`,
+        "-vn",
+        "-an",
         "-f",
         "webvtt",
         "pipe:1",
@@ -208,7 +225,7 @@ function redactMediaUrl(value: string) {
 }
 
 function normalizeProbeStreams(streams: ProbeStream[]): SubtitleTrackInfo[] {
-  return streams
+  return uniquifyTrackLabels(streams
     .filter((stream) => stream.codec_type === "subtitle")
     .map((stream, subtitleTrackIndex) => ({
       subtitleTrackIndex,
@@ -217,9 +234,86 @@ function normalizeProbeStreams(streams: ProbeStream[]): SubtitleTrackInfo[] {
       codec: stream.codec_name ?? "",
       language: stream.tags?.language ?? "",
       title: stream.tags?.title ?? "",
-      label: stream.tags?.title || stream.tags?.language || `Embedded subtitle ${subtitleTrackIndex + 1}`,
+      label: buildTrackLabel(stream, `Subtitle ${subtitleTrackIndex + 1}`),
       isDefault: stream.disposition?.default === 1,
-    }));
+    })));
+}
+
+function normalizeAudioProbeStreams(streams: ProbeStream[]): AudioTrackInfo[] {
+  return uniquifyTrackLabels(streams
+    .filter((stream) => stream.codec_type === "audio")
+    .map((stream, audioTrackIndex) => ({
+      audioTrackIndex,
+      streamIndex: audioTrackIndex,
+      containerStreamIndex: stream.index ?? audioTrackIndex,
+      codec: stream.codec_name ?? "",
+      language: stream.tags?.language ?? "",
+      title: stream.tags?.title ?? "",
+      label: buildTrackLabel(stream, `Audio ${audioTrackIndex + 1}`),
+      isDefault: stream.disposition?.default === 1,
+      channels: stream.channels,
+      channelLayout: stream.channel_layout,
+    })));
+}
+
+function buildTrackLabel(stream: ProbeStream, fallback: string) {
+  const language = normalizeLanguageLabel(stream.tags?.language ?? "");
+  const title = stream.tags?.title?.trim() ?? "";
+  if (language && title && title.toLowerCase() !== language.toLowerCase()) {
+    return `${language} - ${title}`;
+  }
+
+  return title || language || fallback;
+}
+
+function normalizeLanguageLabel(value: string) {
+  const normalized = value.trim().toLowerCase();
+  const labels: Record<string, string> = {
+    da: "Danish",
+    dan: "Danish",
+    de: "German",
+    deu: "German",
+    ger: "German",
+    en: "English",
+    eng: "English",
+    es: "Spanish",
+    spa: "Spanish",
+    fi: "Finnish",
+    fin: "Finnish",
+    fr: "French",
+    fra: "French",
+    fre: "French",
+    it: "Italian",
+    ita: "Italian",
+    ja: "Japanese",
+    jpn: "Japanese",
+    nb: "Norwegian",
+    no: "Norwegian",
+    nor: "Norwegian",
+    pt: "Portuguese",
+    por: "Portuguese",
+    sv: "Swedish",
+    swe: "Swedish",
+  };
+  return labels[normalized] ?? value.trim();
+}
+
+function uniquifyTrackLabels<T extends { label: string }>(tracks: T[]) {
+  const totals = new Map<string, number>();
+  tracks.forEach((track) => totals.set(track.label, (totals.get(track.label) ?? 0) + 1));
+  const seen = new Map<string, number>();
+  return tracks.map((track) => {
+    if ((totals.get(track.label) ?? 0) <= 1) {
+      return track;
+    }
+
+    const count = (seen.get(track.label) ?? 0) + 1;
+    seen.set(track.label, count);
+    return {
+      ...track,
+      label: `${track.label} ${count}`,
+    };
+  });
 }
 
 function normalizeWebVtt(content: string) {

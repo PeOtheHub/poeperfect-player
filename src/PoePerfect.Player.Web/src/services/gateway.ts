@@ -5,7 +5,13 @@ type GatewayStartResponse = {
   startAtSeconds?: number;
 };
 
-export async function startGatewayStream(sourceUrl: string, subtitleLanguage = "swe", startAtSeconds = 0) {
+export async function startGatewayStream(
+  sourceUrl: string,
+  subtitleLanguage = "swe",
+  startAtSeconds = 0,
+  audioTrackIndex = 0,
+  subtitleTrackIndex = -1,
+) {
   const response = await fetch("/api/gateway/start", {
     method: "POST",
     headers: {
@@ -15,6 +21,8 @@ export async function startGatewayStream(sourceUrl: string, subtitleLanguage = "
       url: sourceUrl,
       subtitleLanguage,
       startAtSeconds,
+      audioTrackIndex,
+      subtitleTrackIndex,
     }),
   });
   if (!response.ok) {

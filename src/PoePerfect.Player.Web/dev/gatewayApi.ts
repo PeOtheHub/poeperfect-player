@@ -43,12 +43,22 @@ async function handleStartRequest(request: IncomingMessage, response: ServerResp
     const targetUrl = String(body.url ?? "");
     const subtitleLanguage = String(body.subtitleLanguage ?? "swe");
     const startAtSeconds = Math.max(0, Number(body.startAtSeconds ?? 0) || 0);
+    const audioTrackIndex = Math.max(0, Number(body.audioTrackIndex ?? 0) || 0);
+    const subtitleTrackIndex = Number(body.subtitleTrackIndex ?? -1);
     if (!isAllowedHttpUrl(targetUrl)) {
       writeJson(response, 400, { error: "url must use http or https" });
       return;
     }
+    if (!Number.isInteger(audioTrackIndex)) {
+      writeJson(response, 400, { error: "audioTrackIndex must be a non-negative integer" });
+      return;
+    }
+    if (!Number.isInteger(subtitleTrackIndex) || subtitleTrackIndex < -1) {
+      writeJson(response, 400, { error: "subtitleTrackIndex must be -1 or a non-negative integer" });
+      return;
+    }
 
-    const session = startGatewaySession(targetUrl, subtitleLanguage, startAtSeconds);
+    const session = startGatewaySession(targetUrl, subtitleLanguage, startAtSeconds, audioTrackIndex, subtitleTrackIndex);
     writeJson(response, 200, {
       sessionId: session.id,
       playlistUrl: `/api/gateway/media/${session.id}/master.m3u8`,
@@ -114,14 +124,29 @@ async function handleMediaRequest(request: IncomingMessage, response: ServerResp
   createReadStream(filePath).pipe(response);
 }
 
-function startGatewaySession(sourceUrl: string, subtitleLanguage: string, startAtSeconds: number): GatewaySession {
+function startGatewaySession(
+  sourceUrl: string,
+  subtitleLanguage: string,
+  startAtSeconds: number,
+  audioTrackIndex: number,
+  subtitleTrackIndex: number,
+): GatewaySession {
   const id = randomUUID();
   const dir = join(gatewayRoot, id);
   mkdirSync(dir, { recursive: true });
+  const subtitleMapArgs = subtitleTrackIndex >= 0
+    ? [
+        "-map",
+        `0:s:${subtitleTrackIndex}?`,
+      ]
+    : [];
+  const subtitleCodecArgs = subtitleTrackIndex >= 0
+    ? [
+        "-c:s",
+        "webvtt",
+      ]
+    : [];
 
-  const languageMap = subtitleLanguage === "eng" || subtitleLanguage === "en"
-    ? "0:s:m:language:eng?"
-    : "0:s:m:language:swe?";
   const args = [
     "-hide_banner",
     "-nostdin",
@@ -129,8 +154,6 @@ function startGatewaySession(sourceUrl: string, subtitleLanguage: string, startA
     mediaUserAgent,
     "-rw_timeout",
     "30000000",
-    "-readrate",
-    "1.15",
     "-ss",
     startAtSeconds.toFixed(3),
     "-fflags",
@@ -140,17 +163,16 @@ function startGatewaySession(sourceUrl: string, subtitleLanguage: string, startA
     "-map",
     "0:v:0",
     "-map",
-    "0:a:0?",
-    "-map",
-    languageMap,
+    `0:a:${audioTrackIndex}?`,
+    ...subtitleMapArgs,
     "-c:v",
     "libx264",
     "-preset",
-    "veryfast",
+    "ultrafast",
     "-tune",
     "zerolatency",
     "-crf",
-    "23",
+    "26",
     "-pix_fmt",
     "yuv420p",
     "-profile:v",
@@ -173,8 +195,7 @@ function startGatewaySession(sourceUrl: string, subtitleLanguage: string, startA
     "2",
     "-b:a",
     "160k",
-    "-c:s",
-    "webvtt",
+    ...subtitleCodecArgs,
     "-f",
     "hls",
     "-hls_time",
@@ -190,7 +211,7 @@ function startGatewaySession(sourceUrl: string, subtitleLanguage: string, startA
     join(dir, "index.m3u8"),
   ];
 
-  console.info(`[gateway] starting ${id} from ${redactMediaUrl(sourceUrl)} (${subtitleLanguage}, ${startAtSeconds.toFixed(1)}s)`);
+  console.info(`[gateway] starting ${id} from ${redactMediaUrl(sourceUrl)} (subtitles=${subtitleLanguage}/${subtitleTrackIndex}, audio=${audioTrackIndex}, ${startAtSeconds.toFixed(1)}s)`);
   const process = spawn(ffmpegCommand, args, {
     shell: false,
     windowsHide: true,
