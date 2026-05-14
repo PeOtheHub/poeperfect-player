@@ -234,6 +234,7 @@ Recommended screenshots to add next:
 - [Licensing handoff](./docs/licensing-handoff.md)
 - [Repository roadmap](./docs/repository-roadmap.md)
 - [Web/webOS player context](./docs/webos-player-context.md)
+- [Cross-platform UX porting plan](./docs/cross-platform-ux-porting-plan.md)
 - [Release checklist](./docs/release-checklist.md)
 - [Private repository notice](./LICENSE.md)
 
