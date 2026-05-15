@@ -238,8 +238,10 @@
             </Grid>
 
             <Grid IsVisible="{Binding ShowBrowserShell}"
-                  RowDefinitions="Auto,Auto,Auto,Auto,Auto,*"
-                  RowSpacing="12">
+                  RowDefinitions="Auto,Auto,Auto,*"
+                  RowSpacing="8">
+                <VerticalStackLayout Grid.Row="0"
+                                     Spacing="8">
                 <Border x:Name="BrowserPlaylistEditor"
                         Grid.Row="0"
                         IsVisible="False"
@@ -247,6 +249,70 @@
                         BackgroundColor="#091223"
                         Stroke="#182A45"
                         StrokeShape="RoundRectangle 18">
+                    <Grid IsVisible="False"
+                          RowDefinitions="Auto,Auto"
+                          RowSpacing="8">
+                        <Grid ColumnDefinitions="Auto,Auto,Auto,*"
+                              ColumnSpacing="8">
+                            <Button Text="{Binding SearchToggleButtonText}"
+                                    Clicked="OnToggleSearchClicked"
+                                    WidthRequest="42"
+                                    HeightRequest="38"
+                                    Padding="0"
+                                    CornerRadius="19"
+                                    BackgroundColor="#0F172A"
+                                    BorderColor="#334155"
+                                    BorderWidth="1"
+                                    TextColor="#E2E8F0" />
+                            <Button Grid.Column="1"
+                                    Text="☰"
+                                    IsVisible="False"
+                                    Clicked="OnToggleCategoryManagerClicked"
+                                    WidthRequest="42"
+                                    HeightRequest="38"
+                                    Padding="0"
+                                    CornerRadius="19"
+                                    BackgroundColor="#0F172A"
+                                    BorderColor="#334155"
+                                    BorderWidth="1"
+                                    TextColor="#E2E8F0" />
+                            <Button Grid.Column="2"
+                                    Text="♥"
+                                    IsVisible="False"
+                                    Clicked="OnToggleFavoritesOnlyClicked"
+                                    WidthRequest="42"
+                                    HeightRequest="38"
+                                    Padding="0"
+                                    CornerRadius="19"
+                                    BackgroundColor="#0F172A"
+                                    BorderColor="#334155"
+                                    BorderWidth="1"
+                                    TextColor="#E2E8F0">
+                                <Button.Triggers>
+                                    <DataTrigger TargetType="Button"
+                                                 Binding="{Binding FavoritesOnly}"
+                                                 Value="True">
+                                        <Setter Property="BackgroundColor"
+                                                Value="#1A0B10" />
+                                        <Setter Property="BorderColor"
+                                                Value="#EF4444" />
+                                        <Setter Property="TextColor"
+                                                Value="#EF4444" />
+                                    </DataTrigger>
+                                </Button.Triggers>
+                            </Button>
+                        </Grid>
+
+                        <SearchBar Grid.Row="1"
+                                   IsVisible="{Binding IsSearchVisible}"
+                                   Placeholder="SÃ¶k i vald sektion"
+                                   Text="{Binding SearchText}"
+                                   TextChanged="OnSearchTextChanged"
+                                   BackgroundColor="#0F172A"
+                                   TextColor="#E2E8F0"
+                                   PlaceholderColor="#64748B" />
+                    </Grid>
+
                     <VerticalStackLayout Spacing="10">
                         <Label Text="Playlist-länk"
                                FontAttributes="Bold"
@@ -273,11 +339,77 @@
                 </Border>
 
                 <Border Grid.Row="1"
-                        Padding="14"
-                        BackgroundColor="#091223"
-                        Stroke="#182A45"
-                        StrokeShape="RoundRectangle 18">
-                    <VerticalStackLayout Spacing="10">
+                        IsVisible="{Binding IsSearchVisible}"
+                        Padding="0"
+                        BackgroundColor="Transparent"
+                        StrokeThickness="0">
+                    <Grid RowDefinitions="Auto,Auto"
+                          RowSpacing="8">
+                        <Grid ColumnDefinitions="Auto,Auto,Auto,*"
+                              ColumnSpacing="8">
+                            <Button Text="{Binding SearchToggleButtonText}"
+                                    Clicked="OnToggleSearchClicked"
+                                    WidthRequest="42"
+                                    HeightRequest="38"
+                                    Padding="0"
+                                    CornerRadius="19"
+                                    BackgroundColor="#0F172A"
+                                    BorderColor="#334155"
+                                    BorderWidth="1"
+                                    TextColor="#E2E8F0" />
+                            <Button Grid.Column="1"
+                                    Text="☰"
+                                    IsVisible="False"
+                                    Clicked="OnToggleCategoryManagerClicked"
+                                    WidthRequest="42"
+                                    HeightRequest="38"
+                                    Padding="0"
+                                    CornerRadius="19"
+                                    BackgroundColor="#0F172A"
+                                    BorderColor="#334155"
+                                    BorderWidth="1"
+                                    TextColor="#E2E8F0" />
+                            <Button Grid.Column="2"
+                                    Text="♥"
+                                    IsVisible="False"
+                                    Clicked="OnToggleFavoritesOnlyClicked"
+                                    WidthRequest="42"
+                                    HeightRequest="38"
+                                    Padding="0"
+                                    CornerRadius="19"
+                                    BackgroundColor="#0F172A"
+                                    BorderColor="#334155"
+                                    BorderWidth="1"
+                                    TextColor="#E2E8F0">
+                                <Button.Triggers>
+                                    <DataTrigger TargetType="Button"
+                                                 Binding="{Binding FavoritesOnly}"
+                                                 Value="True">
+                                        <Setter Property="BackgroundColor"
+                                                Value="#1A0B10" />
+                                        <Setter Property="BorderColor"
+                                                Value="#EF4444" />
+                                        <Setter Property="TextColor"
+                                                Value="#EF4444" />
+                                    </DataTrigger>
+                                </Button.Triggers>
+                            </Button>
+                        </Grid>
+
+                        <SearchBar Grid.Row="1"
+                                   IsVisible="{Binding IsSearchVisible}"
+                                   Placeholder="SÃ¶k i vald sektion"
+                                   Text="{Binding SearchText}"
+                                   TextChanged="OnSearchTextChanged"
+                                   BackgroundColor="#0F172A"
+                                   TextColor="#E2E8F0"
+                                   PlaceholderColor="#64748B" />
+                    </Grid>
+
+                    <VerticalStackLayout Spacing="0"
+                                         IsVisible="{Binding IsSearchVisible}"
+                                         HeightRequest="64"
+                                         MinimumHeightRequest="0">
                         <SearchBar Placeholder="Sök i vald sektion"
                                    Text="{Binding SearchText}"
                                    TextChanged="OnSearchTextChanged"
@@ -286,6 +418,8 @@
                                    PlaceholderColor="#64748B" />
 
                         <Grid ColumnDefinitions="*,Auto,Auto"
+                              IsVisible="False"
+                              HeightRequest="0"
                               ColumnSpacing="10">
                             <Label Text="{Binding BrowseHintText}"
                                    TextColor="#8EA3BF"
@@ -403,9 +537,26 @@
                     </VerticalStackLayout>
                 </Border>
 
-                <ScrollView Grid.Row="3"
-                            Orientation="Horizontal"
-                            HorizontalScrollBarVisibility="Never">
+                </VerticalStackLayout>
+
+                <Grid Grid.Row="1"
+                      ColumnDefinitions="Auto,*"
+                      ColumnSpacing="8">
+                    <Button Text="{Binding SearchToggleButtonText}"
+                            Clicked="OnToggleSearchClicked"
+                            WidthRequest="42"
+                            HeightRequest="38"
+                            Padding="0"
+                            CornerRadius="19"
+                            BackgroundColor="#0F172A"
+                            BorderColor="#334155"
+                            BorderWidth="1"
+                            TextColor="#E2E8F0"
+                            VerticalOptions="Center" />
+
+                    <ScrollView Grid.Column="1"
+                                Orientation="Horizontal"
+                                HorizontalScrollBarVisibility="Never">
                     <HorizontalStackLayout BindableLayout.ItemsSource="{Binding CategoryOptions}"
                                            Spacing="8">
                         <BindableLayout.ItemTemplate>
@@ -434,15 +585,16 @@
                             </DataTemplate>
                         </BindableLayout.ItemTemplate>
                     </HorizontalStackLayout>
-                </ScrollView>
+                    </ScrollView>
+                </Grid>
 
-                <Grid Grid.Row="4">
+                <Grid Grid.Row="2">
                     <Label Text="{Binding StatusText}"
                            TextColor="#CBD5E1"
                            VerticalOptions="Center" />
                 </Grid>
 
-                <Grid Grid.Row="5">
+                <Grid Grid.Row="3">
                     <CollectionView ItemsSource="{Binding VisibleChannels}"
                                     IsVisible="{Binding ShowStandardChannelList}"
                                     SelectionMode="Single"
@@ -510,7 +662,7 @@
                                         <VerticalStackLayout Grid.Column="1"
                                                              Spacing="2"
                                                              VerticalOptions="Center">
-                                            <Label Text="{Binding Name}"
+                                            <Label Text="{Binding DisplayName}"
                                                    FontAttributes="Bold"
                                                    FontSize="15"
                                                    TextColor="#E2E8F0"
@@ -519,6 +671,22 @@
                                                    FontSize="12"
                                                    TextColor="#94A3B8"
                                                    LineBreakMode="TailTruncation" />
+                                            <HorizontalStackLayout BindableLayout.ItemsSource="{Binding CompactMetadataChips}"
+                                                                   Spacing="5">
+                                                <BindableLayout.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <Border Padding="7,2"
+                                                                BackgroundColor="#082F49"
+                                                                Stroke="#0E7490"
+                                                                StrokeShape="RoundRectangle 999">
+                                                            <Label Text="{Binding .}"
+                                                                   FontSize="10"
+                                                                   FontAttributes="Bold"
+                                                                   TextColor="#BAE6FD" />
+                                                        </Border>
+                                                    </DataTemplate>
+                                                </BindableLayout.ItemTemplate>
+                                            </HorizontalStackLayout>
                                             <Label Text="{Binding ContentTypeLabel}"
                                                    FontSize="11"
                                                    TextColor="#38BDF8" />
@@ -527,23 +695,42 @@
                                         <Button Grid.Column="2"
                                                 CommandParameter="{Binding .}"
                                                 Clicked="OnFavoriteClicked"
-                                                BackgroundColor="#1E293B"
-                                                TextColor="#E2E8F0"
+                                                Text="&#x2661;"
+                                                FontSize="24"
+                                                FontAttributes="Bold"
+                                                WidthRequest="44"
+                                                HeightRequest="44"
+                                                Padding="0"
+                                                CornerRadius="22"
+                                                BackgroundColor="#111827"
+                                                BorderColor="#334155"
+                                                BorderWidth="1"
+                                                TextColor="#F8FAFC"
                                                 VerticalOptions="Center">
                                             <Button.Triggers>
                                                 <DataTrigger TargetType="Button"
                                                              Binding="{Binding IsFavorite}"
                                                              Value="True">
                                                     <Setter Property="Text"
-                                                            Value="Sparad" />
+                                                            Value="&#x2665;" />
+                                                    <Setter Property="TextColor"
+                                                            Value="#EF4444" />
+                                                    <Setter Property="BorderColor"
+                                                            Value="#EF4444" />
                                                     <Setter Property="BackgroundColor"
-                                                            Value="#92400E" />
+                                                            Value="#1A0B10" />
                                                 </DataTrigger>
                                                 <DataTrigger TargetType="Button"
                                                              Binding="{Binding IsFavorite}"
                                                              Value="False">
                                                     <Setter Property="Text"
-                                                            Value="Spara" />
+                                                            Value="&#x2661;" />
+                                                    <Setter Property="TextColor"
+                                                            Value="#F8FAFC" />
+                                                    <Setter Property="BorderColor"
+                                                            Value="#334155" />
+                                                    <Setter Property="BackgroundColor"
+                                                            Value="#111827" />
                                                 </DataTrigger>
                                             </Button.Triggers>
                                         </Button>
@@ -552,6 +739,172 @@
                             </DataTemplate>
                         </CollectionView.ItemTemplate>
                     </CollectionView>
+
+                    <Grid IsVisible="{Binding ShowMovieDetail}"
+                          RowDefinitions="Auto,*"
+                          RowSpacing="12">
+                        <Grid ColumnDefinitions="Auto,*"
+                              ColumnSpacing="10">
+                            <Button Text="Tillbaka"
+                                    Clicked="OnMovieBackClicked"
+                                    BackgroundColor="#1E293B"
+                                    BorderColor="#334155"
+                                    BorderWidth="1"
+                                    TextColor="#E2E8F0" />
+
+                            <VerticalStackLayout Grid.Column="1"
+                                                 Spacing="2">
+                                <Label Text="{Binding SelectedMovieChannel.DisplayName}"
+                                       FontAttributes="Bold"
+                                       FontSize="18"
+                                       TextColor="#E2E8F0"
+                                       LineBreakMode="TailTruncation" />
+                                <Label Text="{Binding SelectedMovieChannel.CategoryName}"
+                                       FontSize="12"
+                                       TextColor="#94A3B8"
+                                       LineBreakMode="TailTruncation" />
+                            </VerticalStackLayout>
+                        </Grid>
+
+                        <ScrollView Grid.Row="1">
+                            <VerticalStackLayout Spacing="14">
+                                <Border Padding="14"
+                                        BackgroundColor="#0F172A"
+                                        Stroke="#1E293B"
+                                        StrokeShape="RoundRectangle 16">
+                                    <Grid ColumnDefinitions="96,*"
+                                          ColumnSpacing="14">
+                                        <Border WidthRequest="96"
+                                                HeightRequest="140"
+                                                BackgroundColor="#111827"
+                                                Stroke="#334155"
+                                                StrokeShape="RoundRectangle 14">
+                                            <Grid>
+                                                <Label Text="{Binding SelectedMovieChannel.ArtworkPlaceholderText}"
+                                                       FontAttributes="Bold"
+                                                       FontSize="26"
+                                                       HorizontalTextAlignment="Center"
+                                                       VerticalTextAlignment="Center"
+                                                       TextColor="#64748B">
+                                                    <Label.Triggers>
+                                                        <DataTrigger TargetType="Label"
+                                                                     Binding="{Binding SelectedMovieChannel.HasArtwork}"
+                                                                     Value="True">
+                                                            <Setter Property="IsVisible"
+                                                                    Value="False" />
+                                                        </DataTrigger>
+                                                    </Label.Triggers>
+                                                </Label>
+
+                                                <Image Source="{Binding SelectedMovieChannel.ArtworkPath}"
+                                                       Aspect="AspectFit"
+                                                       Opacity="0">
+                                                    <Image.Triggers>
+                                                        <DataTrigger TargetType="Image"
+                                                                     Binding="{Binding SelectedMovieChannel.HasArtwork}"
+                                                                     Value="True">
+                                                            <Setter Property="Opacity"
+                                                                    Value="1" />
+                                                        </DataTrigger>
+                                                    </Image.Triggers>
+                                                </Image>
+                                            </Grid>
+                                        </Border>
+
+                                        <VerticalStackLayout Grid.Column="1"
+                                                             Spacing="8">
+                                            <Label Text="{Binding SelectedMovieChannel.DisplayName}"
+                                                   FontAttributes="Bold"
+                                                   FontSize="20"
+                                                   TextColor="#F8FAFC"
+                                                   LineBreakMode="WordWrap" />
+                                            <Label Text="{Binding SelectedMovieChannel.CategoryName}"
+                                                   FontSize="13"
+                                                   TextColor="#94A3B8" />
+                                            <HorizontalStackLayout BindableLayout.ItemsSource="{Binding SelectedMovieChannel.MetadataChips}"
+                                                                   Spacing="6">
+                                                <BindableLayout.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <Border Padding="8,3"
+                                                                BackgroundColor="#082F49"
+                                                                Stroke="#0E7490"
+                                                                StrokeShape="RoundRectangle 999">
+                                                            <Label Text="{Binding .}"
+                                                                   FontSize="11"
+                                                                   FontAttributes="Bold"
+                                                                   TextColor="#BAE6FD" />
+                                                        </Border>
+                                                    </DataTemplate>
+                                                </BindableLayout.ItemTemplate>
+                                            </HorizontalStackLayout>
+                                            <Border Padding="10,4"
+                                                    HorizontalOptions="Start"
+                                                    BackgroundColor="#082F49"
+                                                    Stroke="#0E7490"
+                                                    StrokeShape="RoundRectangle 999">
+                                                <Label Text="{Binding SelectedMovieChannel.ContentTypeLabel}"
+                                                       FontSize="11"
+                                                       FontAttributes="Bold"
+                                                       TextColor="#BAE6FD" />
+                                            </Border>
+                                        </VerticalStackLayout>
+                                    </Grid>
+                                </Border>
+
+                                <HorizontalStackLayout Spacing="10">
+                                    <Button Text="Starta film"
+                                            Clicked="OnMoviePlayClicked"
+                                            BackgroundColor="#0E7490"
+                                            BorderColor="#38BDF8"
+                                            BorderWidth="1"
+                                            TextColor="White"
+                                            FontAttributes="Bold"
+                                            Padding="18,12" />
+
+                                    <Button CommandParameter="{Binding SelectedMovieChannel}"
+                                            Clicked="OnFavoriteClicked"
+                                            Text="&#x2661;"
+                                            FontSize="24"
+                                            FontAttributes="Bold"
+                                            WidthRequest="48"
+                                            HeightRequest="48"
+                                            Padding="0"
+                                            CornerRadius="24"
+                                            BackgroundColor="#111827"
+                                            BorderColor="#334155"
+                                            BorderWidth="1"
+                                            TextColor="#F8FAFC">
+                                        <Button.Triggers>
+                                            <DataTrigger TargetType="Button"
+                                                         Binding="{Binding SelectedMovieChannel.IsFavorite}"
+                                                         Value="True">
+                                                <Setter Property="Text"
+                                                        Value="&#x2665;" />
+                                                <Setter Property="TextColor"
+                                                        Value="#EF4444" />
+                                                <Setter Property="BorderColor"
+                                                        Value="#EF4444" />
+                                                <Setter Property="BackgroundColor"
+                                                        Value="#1A0B10" />
+                                            </DataTrigger>
+                                            <DataTrigger TargetType="Button"
+                                                         Binding="{Binding SelectedMovieChannel.IsFavorite}"
+                                                         Value="False">
+                                                <Setter Property="Text"
+                                                        Value="&#x2661;" />
+                                                <Setter Property="TextColor"
+                                                        Value="#F8FAFC" />
+                                                <Setter Property="BorderColor"
+                                                        Value="#334155" />
+                                                <Setter Property="BackgroundColor"
+                                                        Value="#111827" />
+                                            </DataTrigger>
+                                        </Button.Triggers>
+                                    </Button>
+                                </HorizontalStackLayout>
+                            </VerticalStackLayout>
+                        </ScrollView>
+                    </Grid>
 
                     <CollectionView ItemsSource="{Binding VisibleSeriesGroups}"
                                     IsVisible="{Binding ShowSeriesOverview}"
@@ -748,23 +1101,42 @@
                                             <Button Grid.Column="1"
                                                     CommandParameter="{Binding Channel}"
                                                     Clicked="OnFavoriteClicked"
-                                                    BackgroundColor="#1E293B"
-                                                    TextColor="#E2E8F0"
+                                                    Text="&#x2661;"
+                                                    FontSize="24"
+                                                    FontAttributes="Bold"
+                                                    WidthRequest="44"
+                                                    HeightRequest="44"
+                                                    Padding="0"
+                                                    CornerRadius="22"
+                                                    BackgroundColor="#111827"
+                                                    BorderColor="#334155"
+                                                    BorderWidth="1"
+                                                    TextColor="#F8FAFC"
                                                     VerticalOptions="Center">
                                                 <Button.Triggers>
                                                     <DataTrigger TargetType="Button"
                                                                  Binding="{Binding Channel.IsFavorite}"
                                                                  Value="True">
                                                         <Setter Property="Text"
-                                                                Value="Sparad" />
+                                                                Value="&#x2665;" />
+                                                        <Setter Property="TextColor"
+                                                                Value="#EF4444" />
+                                                        <Setter Property="BorderColor"
+                                                                Value="#EF4444" />
                                                         <Setter Property="BackgroundColor"
-                                                                Value="#92400E" />
+                                                                Value="#1A0B10" />
                                                     </DataTrigger>
                                                     <DataTrigger TargetType="Button"
                                                                  Binding="{Binding Channel.IsFavorite}"
                                                                  Value="False">
                                                         <Setter Property="Text"
-                                                                Value="Spara" />
+                                                                Value="&#x2661;" />
+                                                        <Setter Property="TextColor"
+                                                                Value="#F8FAFC" />
+                                                        <Setter Property="BorderColor"
+                                                                Value="#334155" />
+                                                        <Setter Property="BackgroundColor"
+                                                                Value="#111827" />
                                                     </DataTrigger>
                                                 </Button.Triggers>
                                             </Button>

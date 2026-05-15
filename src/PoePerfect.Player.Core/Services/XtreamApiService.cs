@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text.Json;
@@ -134,7 +135,9 @@ public sealed class XtreamApiService
                 category.NormalizedName,
                 GetString(element, "stream_icon"),
                 GetString(element, "epg_channel_id") ?? GetString(element, "tvg_id"),
-                GetString(element, "tvg_name") ?? name));
+                GetString(element, "tvg_name") ?? name,
+                null,
+                ParseAddedAt(GetString(element, "added") ?? GetString(element, "added_at") ?? GetString(element, "created_at"))));
         }
 
         return channels;
@@ -177,7 +180,9 @@ public sealed class XtreamApiService
                 category.NormalizedName,
                 GetString(element, "stream_icon"),
                 null,
-                null));
+                null,
+                null,
+                ParseAddedAt(GetString(element, "added") ?? GetString(element, "added_at") ?? GetString(element, "created_at"))));
         }
 
         return channels;
@@ -365,6 +370,37 @@ public sealed class XtreamApiService
         }
 
         return values;
+    }
+
+    private static DateTimeOffset? ParseAddedAt(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        var trimmed = value.Trim();
+        if (long.TryParse(trimmed, NumberStyles.Integer, CultureInfo.InvariantCulture, out var unixValue))
+        {
+            try
+            {
+                return unixValue > 9_999_999_999L
+                    ? DateTimeOffset.FromUnixTimeMilliseconds(unixValue).ToUniversalTime()
+                    : DateTimeOffset.FromUnixTimeSeconds(unixValue).ToUniversalTime();
+            }
+            catch (ArgumentOutOfRangeException)
+            {
+                return null;
+            }
+        }
+
+        return DateTimeOffset.TryParse(
+            trimmed,
+            CultureInfo.InvariantCulture,
+            DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
+            out var parsed)
+            ? parsed.ToUniversalTime()
+            : null;
     }
 
     private static string NormalizeCategoryName(string categoryName, ChannelContentType contentType)

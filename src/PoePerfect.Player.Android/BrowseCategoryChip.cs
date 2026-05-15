@@ -3,6 +3,7 @@ namespace PoePerfect.Player.Android;
 public sealed class BrowseCategoryChip
 {
     public const string FavoritesKey = "__favorites__";
+    public const string LatestKey = "__latest__";
     public const string RecentKey = "__recent__";
 
     public BrowseCategoryChip(string key, string label, int count, bool isSelected)

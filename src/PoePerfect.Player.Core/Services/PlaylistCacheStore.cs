@@ -7,7 +7,7 @@ namespace PoePerfect.Player.Core.Services;
 
 public sealed class PlaylistCacheStore(string cacheDirectoryPath)
 {
-    private const int CurrentSchemaVersion = 1;
+    private const int CurrentSchemaVersion = 2;
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         WriteIndented = false,
@@ -209,6 +209,7 @@ public sealed class PlaylistCacheStore(string cacheDirectoryPath)
             TvgId = channel.TvgId,
             TvgName = channel.TvgName,
             MediaOptions = channel.MediaOptions.ToList(),
+            AddedAtUtc = channel.AddedAtUtc,
         };
     }
 
@@ -221,7 +222,8 @@ public sealed class PlaylistCacheStore(string cacheDirectoryPath)
             cachedChannel.LogoUrl,
             cachedChannel.TvgId,
             cachedChannel.TvgName,
-            cachedChannel.MediaOptions);
+            cachedChannel.MediaOptions,
+            cachedChannel.AddedAtUtc);
     }
 
     public sealed record CachedPlaylist(IReadOnlyList<PlaylistChannel> Channels, DateTimeOffset CachedAtUtc);
@@ -266,6 +268,8 @@ public sealed class PlaylistCacheStore(string cacheDirectoryPath)
         public string? TvgId { get; set; }
 
         public string? TvgName { get; set; }
+
+        public DateTimeOffset? AddedAtUtc { get; set; }
 
         public List<string> MediaOptions { get; set; } = [];
     }

@@ -24,7 +24,7 @@ The main working product today is the Windows desktop app. A browser-based Web v
 | --- | --- | --- |
 | Windows desktop app | Active | Main WPF player with playlist browsing, VOD details, playback, favorites, EPG/cache support, and installer output |
 | Web app | Active MVP | React/Vite browser version with Live/Film/Serier browsing, playlist management, search, details, playback, and a local dev gateway for MKV/HLS testing |
-| Android app | MVP | .NET MAUI app for playlist loading, browsing, search/filtering, favorites, and opening streams |
+| Android app | MVP | .NET MAUI app for playlist loading, browsing, search/filtering, favorites, VOD details, embedded playback, and external fallback |
 | Shared Core | Active | Shared playlist parsing, models, favorites, cache and Xtream-related services |
 | Raspberry Pi/Linux | Planned | Future lightweight/player target |
 | GitHub repository | Private | Product repo for all versions |
@@ -72,10 +72,15 @@ The main working product today is the Windows desktop app. A browser-based Web v
 
 - .NET MAUI Android MVP
 - load playlist from M3U URL or file path
-- browse channels
-- search/filter channels
-- save favorites locally
-- open selected streams in an external player/browser on Android
+- browse Live, Film, and Serier
+- search/filter channels and VOD
+- save favorites locally with heart toggles
+- latest-added, favorites, and recent playback categories, with Film/Serier opening on the 20 latest-added items
+- compact search toggle above the category strip
+- cleaned VOD titles with compact metadata chips
+- movie detail step before playback
+- series grouping with seasons and episodes
+- embedded Android playback with external player/browser fallback
 
 ### Shared Core
 
