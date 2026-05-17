@@ -18,6 +18,18 @@ The goal is to reuse the product direction across platforms without copying Web-
 - Prefer moving common title parsing and watch-progress logic into `PoePerfect.Player.Core` once both Windows and Android need the same behavior.
 - Treat TV/webOS as a remote-first experience with large focus states, clear navigation, and settings that can be operated comfortably from a sofa.
 
+## Current Platform Status
+
+The Windows and Web versions already have the richer movie-detail direction. Android has now caught up on the main VOD browsing/detail path:
+
+- Film and Serier open directly on the 20 latest-added items.
+- Android can use cached latest-added previews from `PoePerfect.Player.Core` so returning to Film/Serier is fast after the cache index exists.
+- The Android browser header is compact, playlist management stays on the start page, and search is a small toggle rather than a large always-visible panel.
+- Android movie details now use the same Xtream `get_vod_info` source shape as Web for plot, genre, duration, rating, release date, director, and cast.
+- Android detail pages show the primary title once, keep the heart favorite action, and add loading feedback around section/category/detail transitions.
+
+The largest remaining Android gap is now player continuity and track UX rather than catalog browsing.
+
 ## Windows Priorities
 
 Windows is the main desktop app and should receive the richer version of the shared UX first.
@@ -38,14 +50,15 @@ Windows is the main desktop app and should receive the richer version of the sha
 
 Android should receive a compact/mobile version of the same product direction. The existing Android project already has useful hooks such as `RecentPlaybackStore` and `PosterImageCacheService`.
 
-- Apply cleaned titles and compact metadata chips in browsing and details.
-- Limit visible chips on small screens so cards stay readable.
-- Add a styled poster fallback through the image cache/loading path.
-- Add continue watching through the existing recent playback storage or a dedicated watch-progress store.
-- Add debounced search with a minimum of 2 characters before filtering starts.
-- Use bottom-sheet style audio/subtitle selection if the Android player exposes embedded tracks.
-- Keep tap-to-play/pause as a player requirement when the internal Android player flow is implemented.
-- Keep external-player behavior available until embedded playback is strong enough to replace it.
+- Done: cleaned titles and compact metadata chips in browsing and details.
+- Done: latest-added default entry for Film/Serier, backed by cached preview channels for fast repeated opens.
+- Done: movie detail step before playback with Xtream metadata, poster, heart favorite, and loading feedback.
+- Done: compact search toggle so search is available without consuming large vertical space.
+- Next: add continue watching through the existing recent playback storage or a dedicated watch-progress store.
+- Next: use bottom-sheet style audio/subtitle selection if the Android player exposes embedded tracks.
+- Next: keep tap-to-play/pause as a player requirement when refining the internal Android player flow.
+- Next: keep external-player behavior available until embedded playback is strong enough to replace it.
+- Ongoing: keep tuning portrait/landscape spacing, poster fallback behavior, and small-screen chip density.
 
 ## webOS / TV Direction
 
@@ -62,11 +75,11 @@ The detailed Web/webOS player strategy lives in [Web/webOS player context](./web
 
 ## Rollout Order
 
-1. Low-risk catalog polish:
-   - title cleanup;
-   - metadata chips;
-   - poster placeholders;
-   - search debounce and 2-character minimum.
+1. Catalog polish and Android catch-up:
+   - title cleanup and metadata chips are implemented on Android;
+   - latest-added default entry is implemented for Android Film/Serier;
+   - compact Android search toggle is implemented;
+   - Android movie detail metadata is implemented through shared Core Xtream helpers.
 2. Viewing continuity:
    - continue watching storage;
    - resume/start-over prompt;
@@ -101,6 +114,8 @@ The shared layer should not own platform-specific player-track APIs. It may desc
 
 - Verify bracket metadata is removed from displayed titles and shown as chips.
 - Verify detail pages show the primary title once.
+- Verify Android movie details show Xtream metadata when available and graceful fallback text when not.
+- Verify Android Film/Serier first show the 20 latest-added items and subsequent opens use the cache index quickly.
 - Verify broken or missing posters show a styled placeholder.
 - Verify one-character search does not filter or freeze the UI.
 - Verify two-character search filters after debounce.

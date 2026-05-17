@@ -16,7 +16,7 @@
 
 `PoePerfect Player` is being built as one product with multiple platform frontends in the same private repository.
 
-The main working product today is the Windows desktop app. A browser-based Web version now exists as the fastest iteration path and as the foundation for a future webOS/TV version. There is also an Android MVP and a shared Core project for reusable playlist/domain logic.
+The main working products today are the Windows desktop app, the Web app, and the Android app. The Web version remains the fastest place to test TV/player ideas and the foundation for a future webOS/TV version. Android has now caught up on the core VOD browsing path, while the shared Core project keeps reusable playlist, cache, and Xtream logic out of platform-specific UI code.
 
 ## Current Status
 
@@ -24,8 +24,8 @@ The main working product today is the Windows desktop app. A browser-based Web v
 | --- | --- | --- |
 | Windows desktop app | Active | Main WPF player with playlist browsing, VOD details, playback, favorites, EPG/cache support, and installer output |
 | Web app | Active MVP | React/Vite browser version with Live/Film/Serier browsing, playlist management, search, details, playback, and a local dev gateway for MKV/HLS testing |
-| Android app | MVP | .NET MAUI app for playlist loading, browsing, search/filtering, favorites, VOD details, embedded playback, and external fallback |
-| Shared Core | Active | Shared playlist parsing, models, favorites, cache and Xtream-related services |
+| Android app | Active MVP | .NET MAUI app for playlist loading, fast cached browsing, search/filtering, favorites, enriched VOD details, embedded playback, and external fallback |
+| Shared Core | Active | Shared playlist parsing, models, favorites, cache/indexing and Xtream-related services |
 | Raspberry Pi/Linux | Planned | Future lightweight/player target |
 | GitHub repository | Private | Product repo for all versions |
 
@@ -76,9 +76,11 @@ The main working product today is the Windows desktop app. A browser-based Web v
 - search/filter channels and VOD
 - save favorites locally with heart toggles
 - latest-added, favorites, and recent playback categories, with Film/Serier opening on the 20 latest-added items
+- cached latest-added previews for faster first section opens after a playlist has been indexed
 - compact search toggle above the category strip
 - cleaned VOD titles with compact metadata chips
-- movie detail step before playback
+- movie detail step before playback with poster, plot, genre, duration, rating, release date, director, cast, play, and heart favorite toggle
+- loading feedback while opening sections, details, categories, and returning from details
 - series grouping with seasons and episodes
 - embedded Android playback with external player/browser fallback
 
@@ -89,7 +91,7 @@ The main working product today is the Windows desktop app. A browser-based Web v
 - favorites persistence
 - playlist/cache-related services
 - series grouping helpers
-- Xtream API helpers
+- Xtream API helpers for category refresh and VOD metadata
 
 ## Repository Layout
 
@@ -228,7 +230,7 @@ Recommended screenshots to add next:
 | --- | --- | --- |
 | Windows | Active | Continue polishing the main app |
 | Web | Active MVP | Bring structure and behavior closer to Windows, then use it as the webOS foundation |
-| Android | MVP | Stabilize browsing/playback and align UX with Windows/Web |
+| Android | Active MVP | Continue polishing playback, continue watching, and embedded audio/subtitle selection after the browsing/detail UX catch-up |
 | Shared Core | Active | Move more reusable logic out of platform-specific projects |
 | Raspberry Pi/Linux | Planned | Evaluate after Web/Core are further along |
 | webOS/TV | Planned | Package the browser app for TV after Web is mature enough |
