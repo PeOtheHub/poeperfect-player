@@ -42,6 +42,7 @@ public partial class MainPage : ContentPage
     private CancellationTokenSource? _applyFiltersCancellationTokenSource;
     private CancellationTokenSource? _artworkLoadCancellationTokenSource;
     private CancellationTokenSource? _searchDebounceCancellationTokenSource;
+    private CancellationTokenSource? _movieDetailCancellationTokenSource;
     private List<CategoryDisplayPreference> _categoryDisplayPreferences = [];
     private IReadOnlyList<PlaylistCategoryManagerItem> _categoryManagerItems = [];
     private bool _favoritesOnly;
@@ -76,6 +77,8 @@ public partial class MainPage : ContentPage
     private BrowseSection? _selectedBrowseSection;
     private string? _selectedCategoryKey;
     private PlaylistChannel? _selectedMovieChannel;
+    private MovieDetailInfo? _selectedMovieDetail;
+    private bool _isMovieDetailLoading;
     private SeriesGroupItem? _selectedSeriesGroup;
     private SeriesSeasonItem? _selectedSeriesSeason;
     private readonly object _seriesGroupCacheSync = new();
@@ -478,6 +481,46 @@ public partial class MainPage : ContentPage
 
     public PlaylistChannel? SelectedMovieChannel => _selectedMovieChannel;
 
+    public MovieDetailInfo? SelectedMovieDetail => _selectedMovieDetail;
+
+    public bool IsMovieDetailLoading
+    {
+        get => _isMovieDetailLoading;
+        private set
+        {
+            if (_isMovieDetailLoading == value)
+            {
+                return;
+            }
+
+            _isMovieDetailLoading = value;
+            OnPropertyChanged();
+            NotifyMovieDetailMetadataChanged();
+        }
+    }
+
+    public string MovieDetailTitle => _selectedMovieDetail?.Title ?? _selectedMovieChannel?.DisplayName ?? "Film";
+
+    public string MovieDetailCategoryText => _selectedMovieChannel?.CategoryName ?? "Film";
+
+    public string MovieDetailPlotText => !string.IsNullOrWhiteSpace(_selectedMovieDetail?.Plot)
+        ? _selectedMovieDetail.Plot
+        : IsMovieDetailLoading
+            ? "Hämtar metadata..."
+            : "Ingen beskrivning hittades ännu.";
+
+    public string MovieDetailGenreText => GetMovieDetailValue(_selectedMovieDetail?.Genre, _selectedMovieChannel?.CategoryName);
+
+    public string MovieDetailDurationText => GetMovieDetailValue(_selectedMovieDetail?.Duration);
+
+    public string MovieDetailRatingText => GetMovieDetailValue(_selectedMovieDetail?.Rating);
+
+    public string MovieDetailReleaseDateText => GetMovieDetailValue(_selectedMovieDetail?.ReleaseDate);
+
+    public string MovieDetailDirectorText => GetMovieDetailValue(_selectedMovieDetail?.Director);
+
+    public string MovieDetailCastText => GetMovieDetailValue(_selectedMovieDetail?.Cast);
+
     public IReadOnlyList<BrowseCategoryChip> CategoryOptions
     {
         get => _categoryOptions;
@@ -529,6 +572,8 @@ public partial class MainPage : ContentPage
     public bool ShowSeriesOverview => IsSeriesSection && !HasSelectedSeriesGroup;
 
     public bool ShowSeriesDetail => IsSeriesSection && HasSelectedSeriesGroup;
+
+    public bool ShowBrowserControls => ShowBrowserShell && !ShowMovieDetail && !ShowSeriesDetail;
 
     public string SeriesDetailTitle => _selectedSeriesGroup?.Title ?? "Serier";
 
@@ -920,6 +965,11 @@ public partial class MainPage : ContentPage
             return;
         }
 
+        if (HasPlaylistSource)
+        {
+            await ShowInteractionLoadingAsync($"Öppnar {GetSectionLabel(section).ToLowerInvariant()}...");
+        }
+
         await SelectSectionAsync(section);
     }
 
@@ -928,6 +978,11 @@ public partial class MainPage : ContentPage
         if (!TryGetBrowseSection(sender, out var section))
         {
             return;
+        }
+
+        if (HasPlaylistSource)
+        {
+            await ShowInteractionLoadingAsync($"Öppnar {GetSectionLabel(section).ToLowerInvariant()}...");
         }
 
         await SelectSectionAsync(section);
@@ -980,17 +1035,19 @@ public partial class MainPage : ContentPage
         ApplyFilters();
     }
 
-    private void OnFavoritesOnlyToggled(object sender, ToggledEventArgs e)
+    private async void OnFavoritesOnlyToggled(object sender, ToggledEventArgs e)
     {
         ClearSelectedMovie();
         FavoritesOnly = e.Value;
+        await ShowInteractionLoadingAsync("Uppdaterar listan...");
         ApplyFilters();
     }
 
-    private void OnToggleFavoritesOnlyClicked(object sender, EventArgs e)
+    private async void OnToggleFavoritesOnlyClicked(object sender, EventArgs e)
     {
         ClearSelectedMovie();
         FavoritesOnly = !FavoritesOnly;
+        await ShowInteractionLoadingAsync("Uppdaterar listan...");
         ApplyFilters();
     }
 
@@ -1016,6 +1073,7 @@ public partial class MainPage : ContentPage
             ResetSeriesNavigation(clearGroups: false);
         }
 
+        await ShowInteractionLoadingAsync($"Bygger {GetCategoryDisplayLabel(selectedCategoryKey)}...");
         RebuildCategoryOptions();
 
         if (_allChannels.Count == 0)
@@ -1162,6 +1220,7 @@ public partial class MainPage : ContentPage
 
         await _favoritesStore.SaveAsync(_favoriteUrls);
         InvalidateSeriesGroupCache();
+        await ShowInteractionLoadingAsync("Uppdaterar favoriter...");
         ApplyFilters();
     }
 
@@ -1179,16 +1238,30 @@ public partial class MainPage : ContentPage
 
         if (channel.ContentType == ChannelContentType.Movie || _selectedBrowseSection == BrowseSection.Movies)
         {
+            await ShowInteractionLoadingAsync("Öppnar detaljer...");
             SelectMovieChannel(channel);
+            IsApplyingFilters = false;
             return;
         }
 
         await OpenChannelAsync(channel);
     }
 
-    private void OnMovieBackClicked(object sender, EventArgs e)
+    private async void OnMovieBackClicked(object sender, EventArgs e)
     {
-        ClearSelectedMovie();
+        try
+        {
+            await ShowInteractionLoadingAsync("Tillbaka till listan...");
+            ClearSelectedMovie();
+            if (_selectedBrowseSection is { } section)
+            {
+                StatusText = GetSectionReadyStatusText(section);
+            }
+        }
+        finally
+        {
+            IsApplyingFilters = false;
+        }
     }
 
     private async void OnMoviePlayClicked(object sender, EventArgs e)
@@ -1206,7 +1279,7 @@ public partial class MainPage : ContentPage
         AppendVisibleChannelBatch();
     }
 
-    private void OnSeriesGroupSelectionChanged(object sender, SelectionChangedEventArgs e)
+    private async void OnSeriesGroupSelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (sender is CollectionView collectionView)
         {
@@ -1218,7 +1291,15 @@ public partial class MainPage : ContentPage
             return;
         }
 
-        SelectSeriesGroup(group);
+        try
+        {
+            await ShowInteractionLoadingAsync("Öppnar serie...");
+            SelectSeriesGroup(group);
+        }
+        finally
+        {
+            IsApplyingFilters = false;
+        }
     }
 
     private void OnVisibleSeriesGroupsRemainingItemsThresholdReached(object? sender, EventArgs e)
@@ -1246,14 +1327,22 @@ public partial class MainPage : ContentPage
         SetSelectedSeriesGroup(null);
     }
 
-    private void OnSeriesSeasonClicked(object sender, EventArgs e)
+    private async void OnSeriesSeasonClicked(object sender, EventArgs e)
     {
         if (sender is not Button { CommandParameter: SeriesSeasonItem season })
         {
             return;
         }
 
-        SetSelectedSeriesSeason(season);
+        try
+        {
+            await ShowInteractionLoadingAsync("Byter säsong...");
+            SetSelectedSeriesSeason(season);
+        }
+        finally
+        {
+            IsApplyingFilters = false;
+        }
     }
 
     private void OnCloseEmbeddedPlayerClicked(object sender, EventArgs e)
@@ -1311,22 +1400,22 @@ public partial class MainPage : ContentPage
             return;
         }
 
-        if (ShouldLoadFullCatalogForDefaultCategory(section))
-        {
-            StatusText = $"Laddar {LatestCategoryLabel.ToLowerInvariant()} från cache...";
-            var didLoadDefaultCategory = await LoadPlaylistAsync(userInitiated: false, preferCache: true);
-            if (didLoadDefaultCategory)
-            {
-                StatusText = GetSectionReadyStatusText(section);
-            }
-
-            return;
-        }
-
         var didLoadPreview = await TryLoadSectionPreviewAsync(section);
         if (didLoadPreview)
         {
             _pendingBrowseSectionAfterLoad = null;
+            if (ShouldLoadFullCatalogForDefaultCategory(section) && !HasLatestPreviewChannels(section))
+            {
+                StatusText = $"Laddar {LatestCategoryLabel.ToLowerInvariant()} från cache...";
+                var didLoadDefaultCategory = await LoadPlaylistAsync(userInitiated: false, preferCache: true);
+                if (didLoadDefaultCategory)
+                {
+                    StatusText = GetSectionReadyStatusText(section);
+                }
+
+                return;
+            }
+
             StatusText = GetSectionReadyStatusText(section);
             return;
         }
@@ -1382,6 +1471,7 @@ public partial class MainPage : ContentPage
                 if (cachedPlaylist is { Channels.Count: > 0 })
                 {
                     await ApplyLoadedChannelsAsync(source, cachedPlaylist.Channels, loadCancellationTokenSource.Token);
+                    await SaveCacheIndexBestEffortAsync(source, cachedPlaylist.Channels, loadCancellationTokenSource.Token);
                     StatusText = cachedPlaylist.Channels.Count == 1
                         ? "1 objekt laddat från lokal cache."
                         : $"{cachedPlaylist.Channels.Count} objekt laddade från lokal cache.";
@@ -1563,6 +1653,21 @@ public partial class MainPage : ContentPage
         }
     }
 
+    private async Task SaveCacheIndexBestEffortAsync(
+        string source,
+        IReadOnlyCollection<PlaylistChannel> channels,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _playlistCacheStore.SaveIndexAsync(source, channels, cancellationToken);
+        }
+        catch
+        {
+            // A stale index only affects startup speed; playback and browsing should continue.
+        }
+    }
+
     private void DebounceApplyFilters()
     {
         _searchDebounceCancellationTokenSource?.Cancel();
@@ -1665,6 +1770,7 @@ public partial class MainPage : ContentPage
             }
 
             _sectionPreviews = BuildSectionPreviews(cachedIndex);
+            ApplyFavoritesToPreviewChannels();
             UpdateSectionStats();
             RefreshCategoryPresentation();
             return _sectionPreviews.ContainsKey(section);
@@ -1700,7 +1806,7 @@ public partial class MainPage : ContentPage
 
         var previews = sectionCatalogs.ToDictionary(
             pair => pair.Key,
-            pair => new SectionPreview(pair.Value.Channels.Count, pair.Value.CategorySummaries));
+            pair => new SectionPreview(pair.Value.Channels.Count, pair.Value.CategorySummaries, []));
 
         var sectionStats = sectionCatalogs.ToDictionary(
             pair => pair.Key,
@@ -1747,15 +1853,24 @@ public partial class MainPage : ContentPage
                 sectionIndex.ItemCount,
                 sectionIndex.Categories
                     .Select(category => new CategorySummary(category.Key, category.Label, category.Count))
-                    .ToList());
+                    .ToList(),
+                sectionIndex.LatestChannels);
         }
 
         foreach (var section in Enum.GetValues<BrowseSection>())
         {
-            previews.TryAdd(section, new SectionPreview(0, []));
+            previews.TryAdd(section, new SectionPreview(0, [], []));
         }
 
         return previews;
+    }
+
+    private void ApplyFavoritesToPreviewChannels()
+    {
+        foreach (var channel in _sectionPreviews.Values.SelectMany(preview => preview.LatestChannels))
+        {
+            channel.IsFavorite = _favoriteUrls.Contains(channel.Url);
+        }
     }
 
     private static bool TryMapContentTypeToSection(ChannelContentType contentType, out BrowseSection section)
@@ -2137,6 +2252,12 @@ public partial class MainPage : ContentPage
             && string.Equals(_selectedCategoryKey, BrowseCategoryChip.LatestKey, StringComparison.Ordinal);
     }
 
+    private bool HasLatestPreviewChannels(BrowseSection section)
+    {
+        return _sectionPreviews.TryGetValue(section, out var preview)
+            && preview.LatestChannels.Count > 0;
+    }
+
     private string GetSectionReadyStatusText(BrowseSection section)
     {
         return section is BrowseSection.Movies or BrowseSection.Series
@@ -2173,7 +2294,21 @@ public partial class MainPage : ContentPage
     {
         if (section == BrowseSection.Series)
         {
+            if (!_sectionCatalogs.ContainsKey(section)
+                && _sectionPreviews.TryGetValue(section, out var seriesPreview)
+                && seriesPreview.LatestChannels.Count > 0)
+            {
+                return GetLatestAddedSeriesChannelGroups(seriesPreview.LatestChannels).Count;
+            }
+
             return GetLatestAddedSeriesChannelGroups(GetChannelsForSection(section, includeHiddenCategories: true)).Count;
+        }
+
+        if (!_sectionCatalogs.ContainsKey(section)
+            && _sectionPreviews.TryGetValue(section, out var preview)
+            && preview.LatestChannels.Count > 0)
+        {
+            return Math.Min(LatestAddedCategoryLimit, preview.LatestChannels.Count);
         }
 
         return Math.Min(
@@ -2183,6 +2318,19 @@ public partial class MainPage : ContentPage
 
     private IReadOnlyList<PlaylistChannel> GetLatestAddedChannelsForSection(BrowseSection section)
     {
+        if (!_sectionCatalogs.ContainsKey(section)
+            && _sectionPreviews.TryGetValue(section, out var preview)
+            && preview.LatestChannels.Count > 0)
+        {
+            return section == BrowseSection.Series
+                ? GetLatestAddedSeriesChannelGroups(preview.LatestChannels)
+                    .SelectMany(group => group)
+                    .ToList()
+                : preview.LatestChannels
+                    .Take(LatestAddedCategoryLimit)
+                    .ToList();
+        }
+
         var sourceChannels = GetChannelsForSection(section, includeHiddenCategories: true);
         if (section == BrowseSection.Series)
         {
@@ -2305,6 +2453,13 @@ public partial class MainPage : ContentPage
         _ = ApplyFiltersAsync();
     }
 
+    private async Task ShowInteractionLoadingAsync(string statusText)
+    {
+        StatusText = statusText;
+        IsApplyingFilters = true;
+        await Task.Yield();
+    }
+
     private async Task ApplyFiltersAsync()
     {
         _applyFiltersCancellationTokenSource?.Cancel();
@@ -2319,6 +2474,7 @@ public partial class MainPage : ContentPage
             VisibleChannels = [];
             ResetSeriesNavigation(clearGroups: true);
             EmptyStateText = "Välj Live, Film eller Serier för att fortsätta.";
+            IsApplyingFilters = false;
             return;
         }
 
@@ -2332,6 +2488,7 @@ public partial class MainPage : ContentPage
             EmptyStateText = GetEmptyStateText();
             OnPropertyChanged(nameof(HeaderSubtitle));
             OnPropertyChanged(nameof(BrowseHintText));
+            IsApplyingFilters = false;
             return;
         }
 
@@ -2713,20 +2870,85 @@ public partial class MainPage : ContentPage
     {
         ResetSeriesNavigation(clearGroups: false);
         _selectedMovieChannel = channel;
+        _selectedMovieDetail = null;
+        StatusText = $"Visar {channel.DisplayName}.";
         RestartArtworkLoadingScope();
         QueueArtworkLoading([channel]);
         NotifyMovieDetailChanged();
+        StartMovieDetailLoad(channel);
     }
 
     private void ClearSelectedMovie()
     {
-        if (_selectedMovieChannel is null)
+        _movieDetailCancellationTokenSource?.Cancel();
+        _movieDetailCancellationTokenSource?.Dispose();
+        _movieDetailCancellationTokenSource = null;
+
+        if (_selectedMovieChannel is null && _selectedMovieDetail is null && !IsMovieDetailLoading)
         {
             return;
         }
 
         _selectedMovieChannel = null;
+        _selectedMovieDetail = null;
+        IsMovieDetailLoading = false;
         NotifyMovieDetailChanged();
+    }
+
+    private void StartMovieDetailLoad(PlaylistChannel channel)
+    {
+        _movieDetailCancellationTokenSource?.Cancel();
+        _movieDetailCancellationTokenSource?.Dispose();
+
+        var cancellationTokenSource = new CancellationTokenSource();
+        _movieDetailCancellationTokenSource = cancellationTokenSource;
+        IsMovieDetailLoading = true;
+
+        _ = LoadMovieDetailAsync(channel, cancellationTokenSource.Token);
+    }
+
+    private async Task LoadMovieDetailAsync(PlaylistChannel channel, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var detail = await _xtreamApiService.TryLoadMovieDetailAsync(
+                PlaylistSource.Trim(),
+                channel,
+                _allChannels,
+                cancellationToken).ConfigureAwait(false);
+
+            await MainThread.InvokeOnMainThreadAsync(() =>
+            {
+                if (cancellationToken.IsCancellationRequested
+                    || _selectedMovieChannel is null
+                    || !string.Equals(_selectedMovieChannel.Url, channel.Url, StringComparison.OrdinalIgnoreCase))
+                {
+                    return;
+                }
+
+                _selectedMovieDetail = detail;
+                IsMovieDetailLoading = false;
+                NotifyMovieDetailChanged();
+            });
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch
+        {
+            await MainThread.InvokeOnMainThreadAsync(() =>
+            {
+                if (_selectedMovieChannel is null
+                    || !string.Equals(_selectedMovieChannel.Url, channel.Url, StringComparison.OrdinalIgnoreCase))
+                {
+                    return;
+                }
+
+                _selectedMovieDetail = null;
+                IsMovieDetailLoading = false;
+                NotifyMovieDetailChanged();
+            });
+        }
     }
 
     private void ResetSeriesNavigation(bool clearGroups)
@@ -2797,6 +3019,7 @@ public partial class MainPage : ContentPage
         OnPropertyChanged(nameof(HasSelectedSeriesGroup));
         OnPropertyChanged(nameof(ShowSeriesOverview));
         OnPropertyChanged(nameof(ShowSeriesDetail));
+        OnPropertyChanged(nameof(ShowBrowserControls));
         OnPropertyChanged(nameof(SeriesDetailTitle));
         OnPropertyChanged(nameof(SeriesDetailSubtitle));
         OnPropertyChanged(nameof(HeaderSubtitle));
@@ -2807,12 +3030,28 @@ public partial class MainPage : ContentPage
     private void NotifyMovieDetailChanged()
     {
         OnPropertyChanged(nameof(SelectedMovieChannel));
+        OnPropertyChanged(nameof(SelectedMovieDetail));
+        NotifyMovieDetailMetadataChanged();
         OnPropertyChanged(nameof(HasSelectedMovie));
         OnPropertyChanged(nameof(ShowStandardChannelList));
         OnPropertyChanged(nameof(ShowMovieDetail));
+        OnPropertyChanged(nameof(ShowBrowserControls));
         OnPropertyChanged(nameof(HeaderSubtitle));
         OnPropertyChanged(nameof(BrowseHintText));
         EmptyStateText = GetEmptyStateText();
+    }
+
+    private void NotifyMovieDetailMetadataChanged()
+    {
+        OnPropertyChanged(nameof(MovieDetailTitle));
+        OnPropertyChanged(nameof(MovieDetailCategoryText));
+        OnPropertyChanged(nameof(MovieDetailPlotText));
+        OnPropertyChanged(nameof(MovieDetailGenreText));
+        OnPropertyChanged(nameof(MovieDetailDurationText));
+        OnPropertyChanged(nameof(MovieDetailRatingText));
+        OnPropertyChanged(nameof(MovieDetailReleaseDateText));
+        OnPropertyChanged(nameof(MovieDetailDirectorText));
+        OnPropertyChanged(nameof(MovieDetailCastText));
     }
 
     private static bool MatchesSeriesSearchQuery(SeriesGroupItem group, string query)
@@ -2952,7 +3191,8 @@ public partial class MainPage : ContentPage
 
     private sealed record SectionPreview(
         int ItemCount,
-        IReadOnlyList<CategorySummary> CategorySummaries);
+        IReadOnlyList<CategorySummary> CategorySummaries,
+        IReadOnlyList<PlaylistChannel> LatestChannels);
 
     private sealed record PreparedCatalog(
         List<PlaylistChannel> Channels,
@@ -3417,6 +3657,7 @@ public partial class MainPage : ContentPage
         OnPropertyChanged(nameof(HasSelectedMovie));
         OnPropertyChanged(nameof(ShowStandardChannelList));
         OnPropertyChanged(nameof(ShowMovieDetail));
+        OnPropertyChanged(nameof(ShowBrowserControls));
         OnPropertyChanged(nameof(ShowSeriesOverview));
         OnPropertyChanged(nameof(ShowSeriesDetail));
         OnPropertyChanged(nameof(HeaderTitle));
@@ -3451,6 +3692,16 @@ public partial class MainPage : ContentPage
     {
         return !string.IsNullOrWhiteSpace(value)
             && value.Contains(search, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string GetMovieDetailValue(string? value, string? fallback = null)
+    {
+        if (!string.IsNullOrWhiteSpace(value))
+        {
+            return value.Trim();
+        }
+
+        return string.IsNullOrWhiteSpace(fallback) ? "Saknas" : fallback.Trim();
     }
 
     private static bool TryGetBrowseSection(object? sender, out BrowseSection section)

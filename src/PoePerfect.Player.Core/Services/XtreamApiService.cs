@@ -15,6 +15,61 @@ public sealed class XtreamApiService
 
     private static readonly HttpClient HttpClient = CreateHttpClient();
 
+    public async Task<MovieDetailInfo?> TryLoadMovieDetailAsync(
+        string source,
+        PlaylistChannel channel,
+        IReadOnlyList<PlaylistChannel> knownChannels,
+        CancellationToken cancellationToken = default)
+    {
+        if (channel.ContentType != ChannelContentType.Movie)
+        {
+            return null;
+        }
+
+        var connection = TryCreateConnection(source, knownChannels);
+        if (connection is null || !TryGetMovieStreamId(channel, out var streamId))
+        {
+            return null;
+        }
+
+        var uri = BuildPlayerApiUri(connection, "get_vod_info", categoryId: null, ("vod_id", streamId));
+        using var response = await SendGetAsync(uri, cancellationToken).ConfigureAwait(false);
+        if (!response.IsSuccessStatusCode)
+        {
+            return null;
+        }
+
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+        using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken).ConfigureAwait(false);
+        if (document.RootElement.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        var root = document.RootElement;
+        var info = TryGetObject(root, "info");
+        var movieData = TryGetObject(root, "movie_data");
+        var durationSeconds = NormalizeDurationSeconds(
+            GetString(info, "duration_secs"),
+            GetString(info, "duration"),
+            GetString(movieData, "duration"));
+
+        return new MovieDetailInfo(
+            CleanText(GetString(movieData, "name") ?? GetString(info, "name") ?? channel.DisplayName),
+            GetString(info, "movie_image") ?? GetString(info, "cover_big") ?? GetString(info, "poster_path") ?? channel.LogoUrl,
+            CleanText(GetString(info, "plot") ?? GetString(info, "description")),
+            CleanText(GetString(info, "genre")),
+            CleanText(GetString(info, "cast") ?? GetString(info, "actors")),
+            CleanText(GetString(info, "director")),
+            CleanText(GetString(info, "rating") ?? GetString(info, "rating_5based")),
+            NormalizeDuration(
+                GetString(info, "duration_secs"),
+                GetString(info, "duration"),
+                GetString(movieData, "duration")),
+            durationSeconds,
+            CleanText(GetString(info, "releasedate") ?? GetString(info, "release_date")));
+    }
+
     public async Task<CategoryRefreshResult?> TryLoadCategoryAsync(
         string source,
         ChannelContentType contentType,
@@ -271,7 +326,11 @@ public sealed class XtreamApiService
         return true;
     }
 
-    private static Uri BuildPlayerApiUri(XtreamConnection connection, string action, string? categoryId)
+    private static Uri BuildPlayerApiUri(
+        XtreamConnection connection,
+        string action,
+        string? categoryId,
+        params (string Key, string Value)[] additionalQuery)
     {
         var queryParts = new List<string>
         {
@@ -283,6 +342,14 @@ public sealed class XtreamApiService
         if (!string.IsNullOrWhiteSpace(categoryId))
         {
             queryParts.Add($"category_id={Uri.EscapeDataString(categoryId)}");
+        }
+
+        foreach (var (key, value) in additionalQuery)
+        {
+            if (!string.IsNullOrWhiteSpace(key) && !string.IsNullOrWhiteSpace(value))
+            {
+                queryParts.Add($"{Uri.EscapeDataString(key)}={Uri.EscapeDataString(value)}");
+            }
         }
 
         return new UriBuilder(connection.PlayerApiUri)
@@ -340,6 +407,11 @@ public sealed class XtreamApiService
 
     private static string? GetString(JsonElement element, string propertyName)
     {
+        if (element.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
         if (!element.TryGetProperty(propertyName, out var property))
         {
             return null;
@@ -351,6 +423,104 @@ public sealed class XtreamApiService
             JsonValueKind.Number => property.GetRawText(),
             _ => null,
         };
+    }
+
+    private static JsonElement TryGetObject(JsonElement element, string propertyName)
+    {
+        return element.TryGetProperty(propertyName, out var property) && property.ValueKind == JsonValueKind.Object
+            ? property
+            : default;
+    }
+
+    private static bool TryGetMovieStreamId(PlaylistChannel channel, out string streamId)
+    {
+        streamId = string.Empty;
+        if (!Uri.TryCreate(channel.Url, UriKind.Absolute, out var uri))
+        {
+            return false;
+        }
+
+        var query = ParseQueryString(uri.Query);
+        foreach (var key in new[] { "vod_id", "stream_id", "movie_id", "id" })
+        {
+            if (query.TryGetValue(key, out var queryValue) && !string.IsNullOrWhiteSpace(queryValue))
+            {
+                streamId = queryValue.Trim();
+                return true;
+            }
+        }
+
+        var lastSegment = uri.Segments.LastOrDefault()?.Trim('/');
+        if (string.IsNullOrWhiteSpace(lastSegment))
+        {
+            return false;
+        }
+
+        var extension = Path.GetExtension(lastSegment);
+        streamId = string.IsNullOrWhiteSpace(extension)
+            ? Uri.UnescapeDataString(lastSegment)
+            : Uri.UnescapeDataString(Path.GetFileNameWithoutExtension(lastSegment));
+
+        return !string.IsNullOrWhiteSpace(streamId);
+    }
+
+    private static int? NormalizeDurationSeconds(params string?[] values)
+    {
+        foreach (var value in values)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                continue;
+            }
+
+            var trimmed = value.Trim();
+            if (int.TryParse(trimmed, NumberStyles.Integer, CultureInfo.InvariantCulture, out var seconds)
+                && seconds > 0)
+            {
+                return seconds;
+            }
+
+            if (TimeSpan.TryParse(trimmed, CultureInfo.InvariantCulture, out var timeSpan)
+                && timeSpan.TotalSeconds > 0)
+            {
+                return (int)Math.Round(timeSpan.TotalSeconds);
+            }
+        }
+
+        return null;
+    }
+
+    private static string NormalizeDuration(params string?[] values)
+    {
+        var durationSeconds = NormalizeDurationSeconds(values);
+        if (durationSeconds is { } seconds)
+        {
+            var timeSpan = TimeSpan.FromSeconds(seconds);
+            if (timeSpan.TotalHours >= 1)
+            {
+                return $"{(int)timeSpan.TotalHours} h {timeSpan.Minutes} min";
+            }
+
+            return $"{timeSpan.Minutes} min";
+        }
+
+        foreach (var value in values)
+        {
+            var cleaned = CleanText(value);
+            if (!string.IsNullOrWhiteSpace(cleaned))
+            {
+                return cleaned;
+            }
+        }
+
+        return string.Empty;
+    }
+
+    private static string CleanText(string? value)
+    {
+        return string.IsNullOrWhiteSpace(value)
+            ? string.Empty
+            : Regex.Replace(value.Trim(), "\\s+", " ");
     }
 
     private static Dictionary<string, string> ParseQueryString(string queryString)

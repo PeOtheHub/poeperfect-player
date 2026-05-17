@@ -11,19 +11,25 @@
              Shell.NavBarIsVisible="False"
              BackgroundColor="#020617">
 
-    <Grid Padding="16"
+    <Grid Padding="12"
           RowDefinitions="Auto,*"
-          RowSpacing="12">
+          RowSpacing="6">
         <Border Grid.Row="0"
-                Padding="14,12"
+                Padding="8,6"
                 BackgroundColor="#091223"
                 Stroke="#182A45"
-                StrokeShape="RoundRectangle 18">
+                StrokeShape="RoundRectangle 16">
             <Grid ColumnDefinitions="Auto,*,Auto"
-                  ColumnSpacing="12">
+                  ColumnSpacing="8">
                 <Button Text="Hem"
                         Clicked="OnBackToDashboardClicked"
                         IsVisible="{Binding ShowBrowserShell}"
+                        WidthRequest="58"
+                        HeightRequest="38"
+                        Padding="0"
+                        CornerRadius="12"
+                        FontSize="14"
+                        VerticalOptions="Center"
                         BackgroundColor="#0F172A"
                         BorderColor="#334155"
                         BorderWidth="1"
@@ -32,17 +38,27 @@
                 <VerticalStackLayout Grid.Column="1"
                                      Spacing="2">
                     <Label Text="{Binding HeaderTitle}"
-                           FontSize="20"
+                           FontSize="18"
                            FontAttributes="Bold"
+                           LineBreakMode="TailTruncation"
                            TextColor="#F8FAFC" />
                     <Label Text="{Binding HeaderSubtitle}"
-                           FontSize="12"
+                           FontSize="11"
+                           MaxLines="1"
+                           LineBreakMode="TailTruncation"
                            TextColor="#8EA3BF" />
                 </VerticalStackLayout>
 
                 <Button Grid.Column="2"
                         Text="Playlists"
                         Clicked="OnOpenPlaylistEditorClicked"
+                        IsVisible="{Binding ShowDashboard}"
+                        WidthRequest="96"
+                        HeightRequest="38"
+                        Padding="0"
+                        CornerRadius="12"
+                        FontSize="14"
+                        VerticalOptions="Center"
                         BackgroundColor="#0F172A"
                         BorderColor="#334155"
                         BorderWidth="1"
@@ -540,6 +556,7 @@
                 </VerticalStackLayout>
 
                 <Grid Grid.Row="1"
+                      IsVisible="{Binding ShowBrowserControls}"
                       ColumnDefinitions="Auto,*"
                       ColumnSpacing="8">
                     <Button Text="{Binding SearchToggleButtonText}"
@@ -588,7 +605,8 @@
                     </ScrollView>
                 </Grid>
 
-                <Grid Grid.Row="2">
+                <Grid Grid.Row="2"
+                      IsVisible="{Binding ShowBrowserControls}">
                     <Label Text="{Binding StatusText}"
                            TextColor="#CBD5E1"
                            VerticalOptions="Center" />
@@ -751,19 +769,6 @@
                                     BorderColor="#334155"
                                     BorderWidth="1"
                                     TextColor="#E2E8F0" />
-
-                            <VerticalStackLayout Grid.Column="1"
-                                                 Spacing="2">
-                                <Label Text="{Binding SelectedMovieChannel.DisplayName}"
-                                       FontAttributes="Bold"
-                                       FontSize="18"
-                                       TextColor="#E2E8F0"
-                                       LineBreakMode="TailTruncation" />
-                                <Label Text="{Binding SelectedMovieChannel.CategoryName}"
-                                       FontSize="12"
-                                       TextColor="#94A3B8"
-                                       LineBreakMode="TailTruncation" />
-                            </VerticalStackLayout>
                         </Grid>
 
                         <ScrollView Grid.Row="1">
@@ -813,12 +818,12 @@
 
                                         <VerticalStackLayout Grid.Column="1"
                                                              Spacing="8">
-                                            <Label Text="{Binding SelectedMovieChannel.DisplayName}"
+                                            <Label Text="{Binding MovieDetailTitle}"
                                                    FontAttributes="Bold"
                                                    FontSize="20"
                                                    TextColor="#F8FAFC"
                                                    LineBreakMode="WordWrap" />
-                                            <Label Text="{Binding SelectedMovieChannel.CategoryName}"
+                                            <Label Text="{Binding MovieDetailCategoryText}"
                                                    FontSize="13"
                                                    TextColor="#94A3B8" />
                                             <HorizontalStackLayout BindableLayout.ItemsSource="{Binding SelectedMovieChannel.MetadataChips}"
@@ -849,6 +854,105 @@
                                             </Border>
                                         </VerticalStackLayout>
                                     </Grid>
+                                </Border>
+
+                                <Grid ColumnDefinitions="Auto,*"
+                                      ColumnSpacing="8"
+                                      IsVisible="{Binding IsMovieDetailLoading}">
+                                    <ActivityIndicator IsRunning="{Binding IsMovieDetailLoading}"
+                                                       WidthRequest="18"
+                                                       HeightRequest="18"
+                                                       Color="#38BDF8" />
+                                    <Label Grid.Column="1"
+                                           Text="Hämtar metadata..."
+                                           FontSize="12"
+                                           TextColor="#94A3B8"
+                                           VerticalTextAlignment="Center" />
+                                </Grid>
+
+                                <Border Padding="14"
+                                        BackgroundColor="#07111F"
+                                        Stroke="#1E293B"
+                                        StrokeShape="RoundRectangle 14">
+                                    <VerticalStackLayout Spacing="12">
+                                        <Label Text="{Binding MovieDetailPlotText}"
+                                               FontSize="13"
+                                               LineBreakMode="WordWrap"
+                                               TextColor="#CBD5E1" />
+
+                                        <Grid ColumnDefinitions="*,*"
+                                              RowDefinitions="Auto,Auto,Auto"
+                                              ColumnSpacing="10"
+                                              RowSpacing="10">
+                                            <VerticalStackLayout Spacing="2">
+                                                <Label Text="Genre"
+                                                       FontSize="10"
+                                                       TextColor="#64748B" />
+                                                <Label Text="{Binding MovieDetailGenreText}"
+                                                       FontSize="13"
+                                                       TextColor="#E2E8F0"
+                                                       LineBreakMode="TailTruncation" />
+                                            </VerticalStackLayout>
+
+                                            <VerticalStackLayout Grid.Column="1"
+                                                                 Spacing="2">
+                                                <Label Text="Längd"
+                                                       FontSize="10"
+                                                       TextColor="#64748B" />
+                                                <Label Text="{Binding MovieDetailDurationText}"
+                                                       FontSize="13"
+                                                       TextColor="#E2E8F0"
+                                                       LineBreakMode="TailTruncation" />
+                                            </VerticalStackLayout>
+
+                                            <VerticalStackLayout Grid.Row="1"
+                                                                 Spacing="2">
+                                                <Label Text="Betyg"
+                                                       FontSize="10"
+                                                       TextColor="#64748B" />
+                                                <Label Text="{Binding MovieDetailRatingText}"
+                                                       FontSize="13"
+                                                       TextColor="#E2E8F0"
+                                                       LineBreakMode="TailTruncation" />
+                                            </VerticalStackLayout>
+
+                                            <VerticalStackLayout Grid.Row="1"
+                                                                 Grid.Column="1"
+                                                                 Spacing="2">
+                                                <Label Text="Premiär"
+                                                       FontSize="10"
+                                                       TextColor="#64748B" />
+                                                <Label Text="{Binding MovieDetailReleaseDateText}"
+                                                       FontSize="13"
+                                                       TextColor="#E2E8F0"
+                                                       LineBreakMode="TailTruncation" />
+                                            </VerticalStackLayout>
+
+                                            <VerticalStackLayout Grid.Row="2"
+                                                                 Spacing="2">
+                                                <Label Text="Regi"
+                                                       FontSize="10"
+                                                       TextColor="#64748B" />
+                                                <Label Text="{Binding MovieDetailDirectorText}"
+                                                       FontSize="13"
+                                                       TextColor="#E2E8F0"
+                                                       LineBreakMode="TailTruncation" />
+                                            </VerticalStackLayout>
+
+                                            <VerticalStackLayout Grid.Row="2"
+                                                                 Grid.Column="1"
+                                                                 Spacing="2">
+                                                <Label Text="Cast"
+                                                       FontSize="10"
+                                                       TextColor="#64748B" />
+                                                <Label Text="{Binding MovieDetailCastText}"
+                                                       FontSize="13"
+                                                       TextColor="#E2E8F0"
+                                                       MaxLines="2"
+                                                       LineBreakMode="TailTruncation" />
+                                            </VerticalStackLayout>
+                                        </Grid>
+                                    </VerticalStackLayout>
                                 </Border>
 
                                 <HorizontalStackLayout Spacing="10">

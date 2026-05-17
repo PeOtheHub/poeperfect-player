@@ -8,6 +8,7 @@ namespace PoePerfect.Player.Core.Services;
 public sealed class PlaylistCacheStore(string cacheDirectoryPath)
 {
     private const int CurrentSchemaVersion = 2;
+    private const int LatestIndexChannelLimit = 40;
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         WriteIndented = false,
@@ -82,6 +83,9 @@ public sealed class PlaylistCacheStore(string cacheDirectoryPath)
                     section.ItemCount,
                     section.Categories
                         .Select(category => new CachedCategoryIndex(category.Key, category.Label, category.Count))
+                        .ToList(),
+                    section.LatestChannels
+                        .Select(ToPlaylistChannel)
                         .ToList()))
                 .ToList();
 
@@ -126,6 +130,33 @@ public sealed class PlaylistCacheStore(string cacheDirectoryPath)
         }
 
         File.Move(temporaryFilePath, cacheFilePath, true);
+        File.Move(temporaryIndexFilePath, cacheIndexFilePath, true);
+    }
+
+    public async Task SaveIndexAsync(
+        string source,
+        IReadOnlyCollection<PlaylistChannel> channels,
+        CancellationToken cancellationToken = default)
+    {
+        Directory.CreateDirectory(CacheDirectoryPath);
+
+        var cacheEntry = new PlaylistCacheEntry
+        {
+            SchemaVersion = CurrentSchemaVersion,
+            Source = source,
+            CachedAtUtc = DateTimeOffset.UtcNow,
+            SourceLastWriteUtc = File.Exists(source) ? File.GetLastWriteTimeUtc(source) : null,
+        };
+        var cacheIndexEntry = BuildCacheIndexEntry(cacheEntry, channels);
+
+        var cacheIndexFilePath = GetCacheIndexFilePath(source);
+        var temporaryIndexFilePath = $"{cacheIndexFilePath}.tmp";
+
+        await using (var stream = File.Create(temporaryIndexFilePath))
+        {
+            await JsonSerializer.SerializeAsync(stream, cacheIndexEntry, JsonOptions, cancellationToken);
+        }
+
         File.Move(temporaryIndexFilePath, cacheIndexFilePath, true);
     }
 
@@ -182,6 +213,14 @@ public sealed class PlaylistCacheStore(string cacheDirectoryPath)
                 {
                     ContentType = group.Key,
                     ItemCount = group.Count(),
+                    LatestChannels = group
+                        .Select((channel, index) => new { Channel = channel, Index = index })
+                        .OrderByDescending(item => item.Channel.AddedAtUtc.HasValue)
+                        .ThenByDescending(item => item.Channel.AddedAtUtc)
+                        .ThenBy(item => item.Index)
+                        .Take(LatestIndexChannelLimit)
+                        .Select(item => ToCachedChannel(item.Channel))
+                        .ToList(),
                     Categories = group
                         .GroupBy(channel => channel.CategoryName, StringComparer.OrdinalIgnoreCase)
                         .Select(categoryGroup => new CachedCategory
@@ -233,7 +272,8 @@ public sealed class PlaylistCacheStore(string cacheDirectoryPath)
     public sealed record CachedSectionIndex(
         ChannelContentType ContentType,
         int ItemCount,
-        IReadOnlyList<CachedCategoryIndex> Categories);
+        IReadOnlyList<CachedCategoryIndex> Categories,
+        IReadOnlyList<PlaylistChannel> LatestChannels);
 
     public sealed record CachedCategoryIndex(string Key, string Label, int Count);
 
@@ -279,6 +319,8 @@ public sealed class PlaylistCacheStore(string cacheDirectoryPath)
         public ChannelContentType ContentType { get; set; }
 
         public int ItemCount { get; set; }
+
+        public List<CachedChannel> LatestChannels { get; set; } = [];
 
         public List<CachedCategory> Categories { get; set; } = [];
     }
