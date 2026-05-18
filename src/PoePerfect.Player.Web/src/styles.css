@@ -636,7 +636,7 @@ body.webos-tv .dashboard-card span {
 .playlist-page {
   position: relative;
   display: grid;
-  grid-template-rows: auto 1fr;
+  grid-template-rows: auto auto 1fr;
   gap: 16px;
   min-height: 0;
 }
@@ -654,6 +654,62 @@ body.webos-tv .dashboard-card span {
 
 .playlist-source-controls {
   grid-template-columns: minmax(280px, 1fr) auto auto;
+}
+
+.player-settings-panel {
+  display: grid;
+  grid-template-columns: minmax(220px, 360px) minmax(220px, 1fr) minmax(220px, 1fr);
+  align-items: end;
+  gap: 18px;
+}
+
+.player-setting-group {
+  display: grid;
+  gap: 8px;
+}
+
+.player-setting-group strong {
+  color: #cbd5e1;
+  font-size: 12px;
+  text-transform: uppercase;
+}
+
+.segmented-control {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  gap: 6px;
+  padding: 5px;
+  border: 1px solid #1f2937;
+  border-radius: 14px;
+  background: rgba(5, 8, 13, 0.82);
+}
+
+.segmented-control button {
+  min-height: 38px;
+  padding: 0 12px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: #cbd5e1;
+  font-size: 12px;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.segmented-control button.active {
+  border-color: rgba(56, 189, 248, 0.62);
+  background: #0e7490;
+  color: #f8fafc;
+}
+
+body.webos-tv .segmented-control button {
+  min-height: 52px;
+  font-size: 16px;
+}
+
+body.webos-tv .player-setting-group strong {
+  font-size: 14px;
 }
 
 .category-manager {

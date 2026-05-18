@@ -46,10 +46,14 @@ import {
   rememberRecent,
   saveCategoryPreferences,
   saveFavorites,
+  savePlayerSettings,
   saveStoredSource,
   saveWatchProgress,
   clearWatchProgress,
+  loadPlayerSettings,
   type RecentEntry,
+  type PlayerSettings,
+  type StreamFormatPreference,
 } from "./services/storage";
 import { shouldUseGatewayStream, startGatewayStream, stopGatewayStream } from "./services/gateway";
 import { probeEmbeddedSubtitleTracks } from "./services/subtitles";
@@ -66,6 +70,7 @@ type ResumePlaybackRequest = {
 };
 
 export function App() {
+  const isWebOs = useMemo(() => isWebOsRuntime(), []);
   const [view, setView] = useState<AppView>("dashboard");
   const [source, setSource] = useState(loadStoredSource);
   const [catalog, setCatalog] = useState<Channel[]>([]);
@@ -92,11 +97,11 @@ export function App() {
   const [isSeriesDetailLoading, setIsSeriesDetailLoading] = useState(false);
   const [playerChannel, setPlayerChannel] = useState<Channel | undefined>();
   const [resumePrompt, setResumePrompt] = useState<ResumePlaybackRequest | undefined>();
+  const [playerSettings, setPlayerSettings] = useState<PlayerSettings>(() => loadPlayerSettings(getDefaultPlayerSettings(isWebOs)));
   const lastFocusScopeRef = useRef("");
   const hasAutoLoadedSourceRef = useRef(false);
   const cachedCatalogSourceRef = useRef("");
   const categorySwitchTimeoutRef = useRef<number | undefined>();
-  const isWebOs = useMemo(() => isWebOsRuntime(), []);
 
   const sectionCounts = useMemo(() => getSectionCounts(catalog, categoryPreferences), [catalog, categoryPreferences]);
   const categories = useMemo(
@@ -120,6 +125,10 @@ export function App() {
     document.body.classList.toggle("webos-tv", isWebOs);
     return () => document.body.classList.remove("webos-tv");
   }, [isWebOs]);
+
+  useEffect(() => {
+    savePlayerSettings(playerSettings);
+  }, [playerSettings]);
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
@@ -479,8 +488,9 @@ export function App() {
 
   function startPlayback(channel: Channel, resumePositionSeconds = 0) {
     abortSubtitlePreparation();
+    const playbackChannel = applyPlaybackSettings(channel, playerSettings, isWebOs);
     setPlayerChannel({
-      ...channel,
+      ...playbackChannel,
       resumePositionSeconds,
     });
     setRecent(rememberRecent({ section: channel.contentType, url: channel.url, playedAt: Date.now() }));
@@ -643,6 +653,9 @@ export function App() {
     return (
       <VideoPlayer
         channel={playerChannel}
+        playerMode={isWebOs ? playerSettings.vodPlayerMode : "smart"}
+        streamFormat={isWebOs ? playerSettings.streamFormat : "default"}
+        showTrackDiagnostics={isWebOs}
         onClose={closePlayer}
         onProgress={savePlayerProgress}
         onGatewaySessionChange={(gateway) => {
@@ -699,6 +712,9 @@ export function App() {
           setSource={setSource}
           isLoading={isLoading}
           status={status}
+          isWebOs={isWebOs}
+          playerSettings={playerSettings}
+          setPlayerSettings={setPlayerSettings}
           managerSection={managerSection}
           setManagerSection={setManagerSection}
           managerItems={managerItems}
@@ -879,6 +895,9 @@ function PlaylistManager({
   setSource,
   isLoading,
   status,
+  isWebOs,
+  playerSettings,
+  setPlayerSettings,
   managerSection,
   setManagerSection,
   managerItems,
@@ -891,6 +910,9 @@ function PlaylistManager({
   setSource: (source: string) => void;
   isLoading: boolean;
   status: string;
+  isWebOs: boolean;
+  playerSettings: PlayerSettings;
+  setPlayerSettings: (settings: PlayerSettings) => void;
   managerSection: BrowseSection;
   setManagerSection: (section: BrowseSection) => void;
   managerItems: CategoryManagerItem[];
@@ -930,6 +952,41 @@ function PlaylistManager({
               onChange={(event) => onLoadFromFile(event.target.files?.[0])}
             />
           </label>
+        </div>
+      </div>
+
+      <div className="settings-panel player-settings-panel">
+        <div>
+          <h2>Player Settings</h2>
+          <p>{isWebOs ? "webOS-test: matcha LG-klientens Native/Smart och streamformat." : "Lokala uppspelningsinställningar."}</p>
+        </div>
+        <div className="player-setting-group">
+          <strong>VOD Player</strong>
+          <div className="segmented-control">
+            {(["native", "smart"] as const).map((mode) => (
+              <button
+                key={mode}
+                className={playerSettings.vodPlayerMode === mode ? "active" : ""}
+                onClick={() => setPlayerSettings({ ...playerSettings, vodPlayerMode: mode })}
+              >
+                {mode === "native" ? "Native Player" : "Smart Player"}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="player-setting-group">
+          <strong>Stream Format</strong>
+          <div className="segmented-control">
+            {(["default", "m3u8", "ts"] as const).map((format) => (
+              <button
+                key={format}
+                className={playerSettings.streamFormat === format ? "active" : ""}
+                onClick={() => setPlayerSettings({ ...playerSettings, streamFormat: format })}
+              >
+                {format === "default" ? "Default" : format.toUpperCase()}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -1550,6 +1607,43 @@ function isWebOsRuntime() {
   return userAgent.includes("web0s")
     || userAgent.includes("webos")
     || window.location.href.includes("/com.poeperfect.player/");
+}
+
+function getDefaultPlayerSettings(isWebOs: boolean): PlayerSettings {
+  return isWebOs
+    ? { vodPlayerMode: "smart", streamFormat: "default" }
+    : { vodPlayerMode: "native", streamFormat: "default" };
+}
+
+function applyPlaybackSettings(channel: Channel, settings: PlayerSettings, isWebOs: boolean): Channel {
+  if (!isWebOs || channel.contentType === "live" || settings.streamFormat === "default") {
+    return channel;
+  }
+
+  const url = forceStreamFormat(channel.url, settings.streamFormat);
+  if (!url || url === channel.url) {
+    return channel;
+  }
+
+  return {
+    ...channel,
+    url,
+    originalUrl: channel.originalUrl ?? channel.url,
+  };
+}
+
+function forceStreamFormat(sourceUrl: string, format: Exclude<StreamFormatPreference, "default">) {
+  try {
+    const parsed = new URL(sourceUrl);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      return "";
+    }
+
+    parsed.pathname = parsed.pathname.replace(/(?:\.[^/.?#]+)?$/, `.${format}`);
+    return parsed.toString();
+  } catch {
+    return sourceUrl.replace(/(?:\.[^/.?#]+)?(?=$|[?#])/, `.${format}`);
+  }
 }
 
 function describeCatalogLoadError(error: unknown, isWebOs: boolean) {

@@ -5,6 +5,20 @@ const favoriteKey = "poeperfect.web.favorites";
 const recentKey = "poeperfect.web.recent";
 const categoryPreferencesKey = "poeperfect.web.category-preferences";
 const watchProgressKey = "poeperfect.web.watch-progress";
+const playerSettingsKey = "poeperfect.web.player-settings";
+
+export type VodPlayerMode = "native" | "smart";
+export type StreamFormatPreference = "default" | "m3u8" | "ts";
+
+export type PlayerSettings = {
+  vodPlayerMode: VodPlayerMode;
+  streamFormat: StreamFormatPreference;
+};
+
+const defaultPlayerSettings: PlayerSettings = {
+  vodPlayerMode: "native",
+  streamFormat: "default",
+};
 
 export function loadStoredSource() {
   return localStorage.getItem(sourceKey) ?? "";
@@ -74,6 +88,22 @@ export function loadCategoryPreferences(): CategoryPreferences {
 
 export function saveCategoryPreferences(preferences: CategoryPreferences) {
   localStorage.setItem(categoryPreferencesKey, JSON.stringify(preferences));
+}
+
+export function loadPlayerSettings(defaults: PlayerSettings = defaultPlayerSettings): PlayerSettings {
+  const saved = readJson<Partial<PlayerSettings>>(playerSettingsKey, {});
+  return {
+    vodPlayerMode: saved.vodPlayerMode === "native" || saved.vodPlayerMode === "smart"
+      ? saved.vodPlayerMode
+      : defaults.vodPlayerMode,
+    streamFormat: saved.streamFormat === "default" || saved.streamFormat === "m3u8" || saved.streamFormat === "ts"
+      ? saved.streamFormat
+      : defaults.streamFormat,
+  };
+}
+
+export function savePlayerSettings(settings: PlayerSettings) {
+  localStorage.setItem(playerSettingsKey, JSON.stringify(settings));
 }
 
 function readJson<T>(key: string, fallback: T): T {

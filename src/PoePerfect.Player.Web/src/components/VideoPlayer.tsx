@@ -6,9 +6,13 @@ import { LoadingSpinner } from "./LoadingSpinner";
 import type { Channel } from "../domain";
 import { startGatewayStream, stopGatewayStream } from "../services/gateway";
 import { fetchText } from "../services/http";
+import type { StreamFormatPreference, VodPlayerMode } from "../services/storage";
 
 type VideoPlayerProps = {
   channel: Channel;
+  playerMode?: VodPlayerMode;
+  streamFormat?: StreamFormatPreference;
+  showTrackDiagnostics?: boolean;
   onClose: () => void;
   onProgress?: (positionSeconds: number, durationSeconds: number) => void;
   onGatewaySessionChange?: (gateway: {
@@ -77,7 +81,15 @@ const subtitleLineDefault = -2;
 const subtitleLineWithControlsVisible = -6;
 const progressReportIntervalMs = 5000;
 
-export function VideoPlayer({ channel, onClose, onProgress, onGatewaySessionChange }: VideoPlayerProps) {
+export function VideoPlayer({
+  channel,
+  playerMode = "smart",
+  streamFormat = "default",
+  showTrackDiagnostics = false,
+  onClose,
+  onProgress,
+  onGatewaySessionChange,
+}: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const hlsRef = useRef<Hls | null>(null);
   const activeGatewaySessionRef = useRef(channel.gatewaySessionId);
@@ -103,6 +115,7 @@ export function VideoPlayer({ channel, onClose, onProgress, onGatewaySessionChan
   const shouldAutoPlayRef = useRef(true);
   const lastProgressReportAtRef = useRef(0);
   const hasAppliedResumePositionRef = useRef(false);
+  const hasRetriedOriginalSourceRef = useRef(false);
   const onProgressRef = useRef(onProgress);
   const [activeSourceUrl, setActiveSourceUrl] = useState(channel.url);
   const [gatewayOffset, setGatewayOffset] = useState(channel.gatewayStartOffsetSeconds ?? 0);
@@ -122,6 +135,7 @@ export function VideoPlayer({ channel, onClose, onProgress, onGatewaySessionChan
   const [isUiVisible, setIsUiVisible] = useState(true);
   const [isBuffering, setIsBuffering] = useState(true);
   const [trackPicker, setTrackPicker] = useState<TrackPickerKind | undefined>();
+  const [trackDiagnostics, setTrackDiagnostics] = useState("");
   const isGatewayPlayback = Boolean(channel.gatewaySessionId && channel.originalUrl);
 
   useEffect(() => {
@@ -140,6 +154,7 @@ export function VideoPlayer({ channel, onClose, onProgress, onGatewaySessionChan
     setIsBuffering(true);
     shouldAutoPlayRef.current = true;
     hasAppliedResumePositionRef.current = false;
+    hasRetriedOriginalSourceRef.current = false;
   }, [channel.durationSeconds, channel.gatewaySessionId, channel.gatewayStartOffsetSeconds, channel.gatewaySubtitleTrackIndex, channel.url]);
 
   useEffect(() => {
@@ -308,6 +323,9 @@ export function VideoPlayer({ channel, onClose, onProgress, onGatewaySessionChan
         networkState: player.networkState,
         readyState: player.readyState,
       });
+      if (fallbackToOriginalSource("video_error")) {
+        return;
+      }
       if (error) {
         setSubtitleProbeMessage(`Video-fel: ${error.message || `kod ${error.code}`}`);
       }
@@ -371,10 +389,13 @@ export function VideoPlayer({ channel, onClose, onProgress, onGatewaySessionChan
       }
     }
 
-    if (activeSourceUrl.includes(".m3u8") && Hls.isSupported()) {
+    const shouldUseHlsJs = playerMode === "smart" && activeSourceUrl.includes(".m3u8") && Hls.isSupported();
+    if (shouldUseHlsJs) {
       logPlayerEvent("hls.start", {
         url: describeMediaUrl(activeSourceUrl),
         nativeHls: canPlayNativeHls || "",
+        playerMode,
+        streamFormat,
       });
       hls = new Hls({
         lowLatencyMode: false,
@@ -425,6 +446,7 @@ export function VideoPlayer({ channel, onClose, onProgress, onGatewaySessionChan
         }));
         setAudioTracks(tracks);
         setSelectedAudioTrack(tracks[hls?.audioTrack ?? 0]?.value ?? tracks[0]?.value ?? noAudioTrack);
+        updateTrackDiagnostics("hls_audio_tracks", hls);
       });
       hls.on(Hls.Events.AUDIO_TRACK_SWITCHED, () => {
         if (isGatewayPlayback && isUsingGatewayAudioTracksRef.current) {
@@ -454,6 +476,7 @@ export function VideoPlayer({ channel, onClose, onProgress, onGatewaySessionChan
           label: track.name || track.lang || `Undertext ${index + 1}`,
         }));
         setMediaSubtitleTracks(tracks);
+        updateTrackDiagnostics("hls_subtitle_tracks", hls);
         const shouldRestoreGatewaySubtitle = isGatewayPlayback && shouldRestoreGatewaySubtitleRef.current && tracks.length > 0;
         const restoreTrack = parseTrackValue(subtitleTrackToRestoreRef.current);
         const restoredTrackId = restoreTrack?.source === "hls" && tracks[restoreTrack.id]
@@ -503,6 +526,9 @@ export function VideoPlayer({ channel, onClose, onProgress, onGatewaySessionChan
         console.warn("[player]", message, data);
         logHlsEvent("hls.error", data);
         if (data.fatal) {
+          if (fallbackToOriginalSource("hls_error")) {
+            return;
+          }
           setSubtitleProbeMessage(`Gateway/player-fel: ${data.details}`);
           setIsBuffering(false);
         }
@@ -513,12 +539,19 @@ export function VideoPlayer({ channel, onClose, onProgress, onGatewaySessionChan
           subtitleTracks: hls?.subtitleTracks.length ?? 0,
         });
         refreshNativeTracks();
+        updateTrackDiagnostics("hls_manifest", hls);
         applyCurrentSubtitleOffset();
         ensurePlayback("manifest_parsed");
       });
     } else {
       hlsRef.current = null;
       video.src = activeSourceUrl;
+      logPlayerEvent("native.start", {
+        url: describeMediaUrl(activeSourceUrl),
+        playerMode,
+        streamFormat,
+        nativeHls: canPlayNativeHls || "",
+      });
       video.addEventListener("loadedmetadata", refreshNativeTracks);
       ensurePlayback("direct_source");
     }
@@ -542,6 +575,7 @@ export function VideoPlayer({ channel, onClose, onProgress, onGatewaySessionChan
       if (video.paused) {
         setIsBuffering(false);
       }
+      updateTrackDiagnostics("play_state", hls);
     };
     const updateTime = () => {
       setCurrentTime(video.currentTime || 0);
@@ -563,6 +597,7 @@ export function VideoPlayer({ channel, onClose, onProgress, onGatewaySessionChan
     const hideBufferingAndApplySubtitles = () => {
       setIsBuffering(false);
       applyCurrentSubtitleOffset();
+      updateTrackDiagnostics("ready", hls);
     };
     const ensurePlaybackFromLoadedData = () => ensurePlayback("loadeddata");
     const ensurePlaybackFromCanPlay = () => ensurePlayback("canplay");
@@ -618,7 +653,7 @@ export function VideoPlayer({ channel, onClose, onProgress, onGatewaySessionChan
       video.removeAttribute("src");
       video.load();
     };
-  }, [activeSourceUrl, channel.contentType, channel.durationSeconds, channel.resumePositionSeconds, channel.subtitleTracks, isGatewayPlayback]);
+  }, [activeSourceUrl, channel.contentType, channel.durationSeconds, channel.resumePositionSeconds, channel.subtitleTracks, isGatewayPlayback, playerMode, showTrackDiagnostics, streamFormat]);
 
   function reportWatchProgress(
     localPositionSeconds = videoRef.current?.currentTime || 0,
@@ -640,6 +675,64 @@ export function VideoPlayer({ channel, onClose, onProgress, onGatewaySessionChan
       ? gatewayOffsetRef.current + localPositionSeconds
       : localPositionSeconds;
     progressHandler(absolutePosition, durationSeconds || channel.durationSeconds || 0);
+  }
+
+  function updateTrackDiagnostics(reason: string, hls?: Hls | null) {
+    if (!showTrackDiagnostics) {
+      return;
+    }
+
+    const video = videoRef.current as (HTMLVideoElement & { audioTracks?: NativeAudioTrackList }) | null;
+    const nativeAudioCount = video?.audioTracks?.length ?? 0;
+    const nativeSubtitleCount = video ? getSelectableTextTracks(video).length : 0;
+    const hlsAudioCount = hls?.audioTracks.length ?? hlsRef.current?.audioTracks.length ?? 0;
+    const hlsSubtitleCount = hls?.subtitleTracks.length ?? hlsRef.current?.subtitleTracks.length ?? 0;
+    const sourceKind = getStreamKind(activeSourceUrl);
+    const nextDiagnostics = [
+      playerMode.toUpperCase(),
+      streamFormat.toUpperCase(),
+      sourceKind.toUpperCase(),
+      `A ${nativeAudioCount}/${hlsAudioCount}`,
+      `S ${nativeSubtitleCount}/${hlsSubtitleCount}`,
+      reason,
+    ].join(" | ");
+    setTrackDiagnostics(nextDiagnostics);
+    logPlayerEvent("tracks.diagnostics", {
+      reason,
+      playerMode,
+      streamFormat,
+      sourceKind,
+      nativeAudioCount,
+      nativeSubtitleCount,
+      hlsAudioCount,
+      hlsSubtitleCount,
+      readyState: video?.readyState,
+      networkState: video?.networkState,
+    });
+  }
+
+  function fallbackToOriginalSource(reason: string) {
+    const originalUrl = channel.originalUrl;
+    if (
+      !originalUrl
+      || isGatewayPlayback
+      || activeSourceUrl === originalUrl
+      || hasRetriedOriginalSourceRef.current
+    ) {
+      return false;
+    }
+
+    hasRetriedOriginalSourceRef.current = true;
+    shouldAutoPlayRef.current = true;
+    setIsBuffering(true);
+    setSubtitleProbeMessage("Formatet fungerade inte, provar originalström...");
+    logPlayerEvent("source.fallback_original", {
+      reason,
+      from: describeMediaUrl(activeSourceUrl),
+      to: describeMediaUrl(originalUrl),
+    });
+    setActiveSourceUrl(originalUrl);
+    return true;
   }
 
   function applyInitialResumePosition() {
@@ -1143,7 +1236,7 @@ export function VideoPlayer({ channel, onClose, onProgress, onGatewaySessionChan
     { value: subtitlesOff, source: "native" as const, id: -1, label: "Undertexter av" },
     ...subtitleTracks,
   ];
-  const shouldShowSubtitleProbeMessage = import.meta.env.DEV && Boolean(subtitleProbeMessage);
+  const playerStatusMessage = subtitleProbeMessage || (showTrackDiagnostics ? trackDiagnostics : "");
   const subtitleOffsetLabel = `${subtitleOffsetSeconds > 0 ? "+" : ""}${subtitleOffsetSeconds.toFixed(1)}s`;
   const showBufferingOverlay = isBuffering && shouldAutoPlayRef.current;
   const effectiveUiVisible = isUiVisible || Boolean(trackPicker);
@@ -1275,8 +1368,8 @@ export function VideoPlayer({ channel, onClose, onProgress, onGatewaySessionChan
             </div>
           ) : null}
 
-            {shouldShowSubtitleProbeMessage ? (
-              <span className="track-status-label">{subtitleProbeMessage}</span>
+            {playerStatusMessage ? (
+              <span className="track-status-label">{playerStatusMessage}</span>
             ) : null}
 
             <button className="round-control-button" onClick={toggleFullscreen} aria-label="Fullscreen">
@@ -1416,6 +1509,17 @@ function getTimelineDurationLimit(...values: Array<number | undefined>) {
   return values
     .filter((value): value is number => typeof value === "number" && Number.isFinite(value) && value > 0)
     .reduce((max, value) => Math.max(max, value), 0);
+}
+
+function getStreamKind(sourceUrl: string) {
+  try {
+    const parsed = new URL(sourceUrl, window.location.href);
+    const extension = parsed.pathname.split(".").pop()?.toLowerCase() ?? "";
+    return extension || "unknown";
+  } catch {
+    const match = /\.([a-z0-9]+)(?:$|[?#])/i.exec(sourceUrl);
+    return match?.[1].toLowerCase() ?? "unknown";
+  }
 }
 
 function findSubtitleCueIndex(cues: SubtitleCue[], time: number, currentIndex: number) {

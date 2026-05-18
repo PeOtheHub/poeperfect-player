@@ -81,6 +81,8 @@ In `src/PoePerfect.Player.Web/src/App.tsx`:
 
 - `Spela` starts normal playback without injecting subtitle tracks.
 - `Spela med undertexter` starts the subtitle-capable path when relevant.
+- webOS VOD player settings are stored in local storage with `Smart Player` and `Default` stream format as the safe baseline.
+- Optional webOS stream format overrides (`M3U8`/`TS`) rewrite the VOD URL for testing, but playback falls back to the original source if the TV reports a format/player error.
 - Search is debounced and requires at least two characters before filtering to avoid rendering very large one-letter result sets.
 - Movie cards clean bracket metadata such as `[PRE]`, `[2026]`, `[Multi-Sub]`, and show it as chips instead of repeating it in titles.
 - Watch progress is saved in local storage and a continue-watching prompt lets the user resume or start from the beginning.
@@ -96,6 +98,17 @@ Embedded subtitles inside MKV/MP4/HLS are harder:
 - A webOS TV may expose tracks differently from desktop, so testing on real LG hardware is required.
 
 Working IPTV apps on LG/webOS prove the problem is solvable, but they likely use a more specialized player strategy than a generic browser `<video>` wrapper. We should treat webOS as a real target with adapter-specific diagnostics and settings.
+
+## Real LG webOS Findings
+
+Tested on the living room LG TV with `GOAT [KIDS] [MULTI-AUDIO] [2026]`, a known-good reference title:
+
+- `Smart + Default` plays the original MKV and webOS exposes 3 native audio tracks: `sv`, `en`, and `fi`.
+- The same MKV exposes 0 native text tracks through the packaged web app (`video.textTracks.length === 0`), even though another IPTV app can show many embedded subtitle tracks for the title.
+- `Smart + TS` as a direct VOD extension rewrite returns a webOS media format error for this provider, then the app falls back to the original MKV and playback succeeds.
+- The official webOS format table lists WebVTT as the supported subtitle format for apps, and LG community guidance says embedded MKV subtitles are not exposed to web apps in the generic HTML video path.
+
+Current conclusion: direct HTML video is good enough for baseline MKV playback and native audio selection on this TV, but embedded subtitle discovery needs a different webOS strategy than simple `<video>`/hls.js. Do not reintroduce the desktop Vite/ffmpeg helper as a production solution for webOS.
 
 ## webOS Investigation Plan
 
