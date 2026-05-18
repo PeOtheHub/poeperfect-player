@@ -17,7 +17,7 @@ import {
   Tv,
   Upload,
 } from "lucide-react";
-import { useEffect, useMemo, useState, type SyntheticEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type SyntheticEvent } from "react";
 import { LoadingInline, LoadingOverlay, LoadingSpinner } from "./components/LoadingSpinner";
 import { VideoPlayer } from "./components/VideoPlayer";
 import type {
@@ -35,6 +35,7 @@ import type {
   XtreamConnection,
 } from "./domain";
 import { isSpecialCategory, sectionLabels } from "./domain";
+import { loadCachedCatalog, saveCachedCatalog } from "./services/catalogCache";
 import { loadCatalogFromFile, loadCatalogFromSource } from "./services/catalog";
 import {
   loadCategoryPreferences,
@@ -56,6 +57,7 @@ import { loadMovieDetail, loadSeriesDetail } from "./services/xtream";
 
 const latestLimit = 20;
 const minSearchLength = 2;
+const catalogLoadTimeoutMs = 60_000;
 
 type ResumePlaybackRequest = {
   channel: Channel;
@@ -78,6 +80,7 @@ export function App() {
   const [deferredQuery, setDeferredQuery] = useState("");
   const [status, setStatus] = useState("Ange playlist och ladda katalogen.");
   const [isLoading, setIsLoading] = useState(false);
+  const [isCategorySwitching, setIsCategorySwitching] = useState(false);
   const [selectedMovie, setSelectedMovie] = useState<Channel | undefined>();
   const [movieDetail, setMovieDetail] = useState<MovieDetail | undefined>();
   const [isMovieDetailLoading, setIsMovieDetailLoading] = useState(false);
@@ -89,6 +92,11 @@ export function App() {
   const [isSeriesDetailLoading, setIsSeriesDetailLoading] = useState(false);
   const [playerChannel, setPlayerChannel] = useState<Channel | undefined>();
   const [resumePrompt, setResumePrompt] = useState<ResumePlaybackRequest | undefined>();
+  const lastFocusScopeRef = useRef("");
+  const hasAutoLoadedSourceRef = useRef(false);
+  const cachedCatalogSourceRef = useRef("");
+  const categorySwitchTimeoutRef = useRef<number | undefined>();
+  const isWebOs = useMemo(() => isWebOsRuntime(), []);
 
   const sectionCounts = useMemo(() => getSectionCounts(catalog, categoryPreferences), [catalog, categoryPreferences]);
   const categories = useMemo(
@@ -107,6 +115,11 @@ export function App() {
   const selectedSeason = seriesDetail?.seasons.find((season) => season.key === selectedSeasonKey)
     ?? seriesDetail?.seasons[0];
   const preparedMovieSubtitles: ExternalSubtitleTrack[] = [];
+
+  useEffect(() => {
+    document.body.classList.toggle("webos-tv", isWebOs);
+    return () => document.body.classList.remove("webos-tv");
+  }, [isWebOs]);
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
@@ -129,31 +142,128 @@ export function App() {
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
+      if (isEditableKeyTarget(event.target) && (!isWebOs || event.key === "Backspace")) {
+        return;
+      }
+
+      if (!isBackNavigationKey(event)) {
+        return;
+      }
+
+      let handled = false;
+      if (playerChannel) {
+        closePlayer();
+        handled = true;
+      } else if (selectedMovie || selectedSeries) {
+        closeDetails();
+        handled = true;
+      } else if (view === "browser" || view === "playlists") {
+        setView("dashboard");
+        handled = true;
+      }
+
+      if (handled || isWebOs) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+    }
+
+    window.addEventListener("keydown", onKeyDown, isWebOs);
+    if (isWebOs) {
+      window.addEventListener("keyup", onKeyDown, true);
+    }
+    return () => {
+      window.removeEventListener("keydown", onKeyDown, isWebOs);
+      if (isWebOs) {
+        window.removeEventListener("keyup", onKeyDown, true);
+      }
+    };
+  }, [isWebOs, playerChannel, selectedMovie, selectedSeries, view]);
+
+  useEffect(() => {
+    if (!isWebOs) {
+      return;
+    }
+
+    function onKeyDown(event: KeyboardEvent) {
+      if (playerChannel) {
+        return;
+      }
+
       if (isEditableKeyTarget(event.target)) {
         return;
       }
 
-      if (event.key !== "Escape" && event.key !== "Backspace") {
+      const direction = getSpatialDirection(event);
+      if (!direction) {
         return;
       }
 
-      if (playerChannel) {
-        closePlayer();
+      const moved = moveSpatialFocus(direction);
+      if (moved) {
         event.preventDefault();
-      } else if (selectedMovie || selectedSeries) {
-        closeDetails();
-        event.preventDefault();
-      } else if (view === "browser" || view === "playlists") {
-        setView("dashboard");
-        event.preventDefault();
+        event.stopPropagation();
       }
     }
 
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [playerChannel, selectedMovie, selectedSeries, view]);
+    window.addEventListener("keydown", onKeyDown, true);
 
-  async function loadFromUrl() {
+    const focusScope = [
+      view,
+      section,
+      selectedCategoryKey,
+      selectedMovie?.id ?? "",
+      selectedSeries?.id ?? "",
+      selectedSeasonKey ?? "",
+      resumePrompt ? "resume" : "",
+    ].join("|");
+    if (lastFocusScopeRef.current !== focusScope) {
+      lastFocusScopeRef.current = focusScope;
+      window.setTimeout(() => focusFirstSpatialItem({ forcePreferred: true }), 80);
+    } else {
+      window.setTimeout(() => focusFirstSpatialItem({ forcePreferred: false }), 80);
+    }
+
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, [
+    isWebOs,
+    playerChannel,
+    resumePrompt,
+    view,
+    section,
+    selectedCategoryKey,
+    selectedMovie,
+    selectedSeries,
+    selectedSeasonKey,
+    visibleChannels.length,
+    categories.length,
+    managerItems.length,
+  ]);
+
+  useEffect(() => {
+    if (!isWebOs || hasAutoLoadedSourceRef.current || catalog.length > 0 || !source.trim()) {
+      return;
+    }
+
+    hasAutoLoadedSourceRef.current = true;
+    void loadFromUrl({ reason: "startup" });
+  }, [catalog.length, isWebOs, source]);
+
+  useEffect(() => {
+    const trimmedSource = source.trim();
+    if (!trimmedSource || catalog.length > 0 || cachedCatalogSourceRef.current === trimmedSource) {
+      return;
+    }
+
+    cachedCatalogSourceRef.current = trimmedSource;
+    void restoreCachedCatalog(trimmedSource);
+  }, [catalog.length, source]);
+
+  useEffect(() => {
+    return () => window.clearTimeout(categorySwitchTimeoutRef.current);
+  }, []);
+
+  async function loadFromUrl(options: { reason?: "startup" | "manual" } = {}) {
     if (!source.trim()) {
       setStatus("Ange en M3U- eller Xtream-länk.");
       return;
@@ -161,19 +271,44 @@ export function App() {
 
     setIsLoading(true);
     closeDetails();
-    setStatus("Laddar katalog...");
+    setStatus(options.reason === "startup" ? "Laddar sparad playlist..." : "Laddar katalog...");
+    const abortController = new AbortController();
+    const timeoutId = window.setTimeout(() => abortController.abort(), catalogLoadTimeoutMs);
     try {
       saveStoredSource(source);
-      const result = await loadCatalogFromSource(source, new AbortController().signal);
+      const result = await loadCatalogFromSource(source, abortController.signal);
       setCatalog(result.channels);
       setConnection(result.connection);
+      void saveCachedCatalog(source, result);
       openBestSection(result.channels);
-      setStatus(`${result.channels.length.toLocaleString("sv-SE")} objekt laddade.`);
+      setStatus(options.reason === "startup"
+        ? `${result.channels.length.toLocaleString("sv-SE")} objekt laddade automatiskt.`
+        : `${result.channels.length.toLocaleString("sv-SE")} objekt laddade.`);
     } catch (error) {
-      setStatus(error instanceof Error ? `Kunde inte ladda katalog: ${error.message}` : "Kunde inte ladda katalog.");
+      const cached = await loadCachedCatalog(source);
+      if (cached) {
+        setCatalog(cached.channels);
+        setConnection(cached.connection);
+        openBestSection(cached.channels);
+        setStatus(`${cached.channels.length.toLocaleString("sv-SE")} objekt från sparad katalog. Serverfel: ${describeCatalogLoadError(error, isWebOs)}`);
+      } else {
+        setStatus(`Kunde inte ladda katalog: ${describeCatalogLoadError(error, isWebOs)}`);
+      }
     } finally {
+      window.clearTimeout(timeoutId);
       setIsLoading(false);
     }
+  }
+
+  async function restoreCachedCatalog(trimmedSource: string) {
+    const cached = await loadCachedCatalog(trimmedSource);
+    if (!cached || catalog.length > 0 || source.trim() !== trimmedSource) {
+      return;
+    }
+
+    setCatalog(cached.channels);
+    setConnection(cached.connection);
+    setStatus(`${cached.channels.length.toLocaleString("sv-SE")} objekt från sparad katalog.`);
   }
 
   async function loadFromSelectedFile(file: File | undefined) {
@@ -213,6 +348,31 @@ export function App() {
     setDeferredQuery("");
     closeDetails();
     setView(nextView);
+  }
+
+  function selectCategory(category: CategoryOption) {
+    if (category.key === selectedCategoryKey && !selectedMovie && !selectedSeries) {
+      return;
+    }
+
+    if (!isWebOs) {
+      setSelectedCategoryKey(category.key);
+      closeDetails();
+      return;
+    }
+
+    window.clearTimeout(categorySwitchTimeoutRef.current);
+    setIsCategorySwitching(true);
+    setStatus(`Visar ${category.label}...`);
+
+    categorySwitchTimeoutRef.current = window.setTimeout(() => {
+      setSelectedCategoryKey(category.key);
+      closeDetails();
+      window.clearTimeout(categorySwitchTimeoutRef.current);
+      categorySwitchTimeoutRef.current = window.setTimeout(() => {
+        setIsCategorySwitching(false);
+      }, 520);
+    }, 80);
   }
 
   async function openChannel(channel: Channel) {
@@ -529,6 +689,7 @@ export function App() {
         <Dashboard
           counts={sectionCounts}
           source={source}
+          isTvLayout={isWebOs}
           onOpenSection={openSection}
           onOpenPlaylists={() => setView("playlists")}
         />
@@ -566,10 +727,8 @@ export function App() {
           setQuery={setQuery}
           visibleChannels={visibleChannels}
           favorites={favorites}
-          onSelectCategory={(category) => {
-            setSelectedCategoryKey(category.key);
-            closeDetails();
-          }}
+          isCategorySwitching={isWebOs && isCategorySwitching}
+          onSelectCategory={selectCategory}
           onOpenChannel={openChannel}
           onMovieBack={closeDetails}
           onMoviePlay={(channel) => requestPlayback(channel, "normal")}
@@ -597,15 +756,18 @@ export function App() {
 function Dashboard({
   counts,
   source,
+  isTvLayout,
   onOpenSection,
   onOpenPlaylists,
 }: {
   counts: Record<BrowseSection, number>;
   source: string;
+  isTvLayout: boolean;
   onOpenSection: (section: BrowseSection) => void;
   onOpenPlaylists: () => void;
 }) {
   const totalCount = counts.live + counts.movies + counts.series;
+  const iconSize = isTvLayout ? 84 : 58;
   const playlistLabel = getSourceLabel(source);
   const catalogStatus = totalCount > 0
     ? `${totalCount.toLocaleString("sv-SE")} objekt laddade`
@@ -633,7 +795,7 @@ function Dashboard({
 
           <div className="dashboard-grid">
             <DashboardCard
-              icon={<Tv size={58} />}
+              icon={<Tv size={iconSize} />}
               label="Live"
               description="Direkt och kanaler"
               count={counts.live}
@@ -641,7 +803,7 @@ function Dashboard({
               onClick={() => onOpenSection("live")}
             />
             <DashboardCard
-              icon={<Film size={58} />}
+              icon={<Film size={iconSize} />}
               label="Film"
               description="Filmer och premiärer"
               count={counts.movies}
@@ -649,7 +811,7 @@ function Dashboard({
               onClick={() => onOpenSection("movies")}
             />
             <DashboardCard
-              icon={<Play size={58} />}
+              icon={<Play size={iconSize} />}
               label="Serier"
               description="Säsonger och avsnitt"
               count={counts.series}
@@ -876,6 +1038,7 @@ function BrowserView({
   setQuery,
   visibleChannels,
   favorites,
+  isCategorySwitching,
   onSelectCategory,
   onOpenChannel,
   onMovieBack,
@@ -905,6 +1068,7 @@ function BrowserView({
   setQuery: (query: string) => void;
   visibleChannels: Channel[];
   favorites: Set<string>;
+  isCategorySwitching: boolean;
   onSelectCategory: (category: CategoryOption) => void;
   onOpenChannel: (channel: Channel) => void;
   onMovieBack: () => void;
@@ -1018,17 +1182,20 @@ function BrowserView({
             onEpisodePlay={onEpisodePlay}
           />
         ) : (
-          <div className="poster-grid">
-            {visibleChannels.map((channel) => (
-              <PosterCard
-                key={channel.id}
-                channel={channel}
-                isFavorite={favorites.has(channel.url)}
-                showCategory={isSpecialCategory(selectedCategory)}
-                onOpen={() => void onOpenChannel(channel)}
-              />
-            ))}
-            {visibleChannels.length === 0 && <div className="empty-state">Inget att visa.</div>}
+          <div className="poster-region">
+            {isCategorySwitching ? <LoadingInline message="Byter kategori..." /> : null}
+            <div className={`poster-grid ${isCategorySwitching ? "is-updating" : ""}`}>
+              {visibleChannels.map((channel) => (
+                <PosterCard
+                  key={channel.id}
+                  channel={channel}
+                  isFavorite={favorites.has(channel.url)}
+                  showCategory={isSpecialCategory(selectedCategory)}
+                  onOpen={() => void onOpenChannel(channel)}
+                />
+              ))}
+              {visibleChannels.length === 0 && <div className="empty-state">Inget att visa.</div>}
+            </div>
           </div>
         )}
       </section>
@@ -1372,6 +1539,243 @@ function isEditableKeyTarget(target: EventTarget | null) {
     || target instanceof HTMLTextAreaElement
     || target instanceof HTMLSelectElement
     || target.isContentEditable;
+}
+
+function isWebOsRuntime() {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  const userAgent = window.navigator.userAgent.toLowerCase();
+  return userAgent.includes("web0s")
+    || userAgent.includes("webos")
+    || window.location.href.includes("/com.poeperfect.player/");
+}
+
+function describeCatalogLoadError(error: unknown, isWebOs: boolean) {
+  if (error instanceof DOMException && error.name === "AbortError") {
+    return "timeout efter 60 sekunder. Playlistservern svarar inte just nu.";
+  }
+
+  if (error instanceof Error) {
+    if (isWebOs && /failed to fetch/i.test(error.message)) {
+      return "TV:n kunde inte nå playlistservern. Det kan vara nätverk, CORS eller att servern inte svarar.";
+    }
+
+    return error.message;
+  }
+
+  return "okänt fel.";
+}
+
+type SpatialDirection = "up" | "down" | "left" | "right";
+
+const spatialFocusableSelector = [
+  "button:not(:disabled)",
+  "input:not(:disabled)",
+  "select:not(:disabled)",
+  "textarea:not(:disabled)",
+  "a[href]",
+  "[tabindex]:not([tabindex='-1'])",
+].join(",");
+
+function getSpatialDirection(event: KeyboardEvent): SpatialDirection | undefined {
+  switch (event.key) {
+    case "ArrowUp":
+    case "Up":
+      return "up";
+    case "ArrowDown":
+    case "Down":
+      return "down";
+    case "ArrowLeft":
+    case "Left":
+      return "left";
+    case "ArrowRight":
+    case "Right":
+      return "right";
+    default:
+      break;
+  }
+
+  switch (event.keyCode) {
+    case 37:
+      return "left";
+    case 38:
+      return "up";
+    case 39:
+      return "right";
+    case 40:
+      return "down";
+    default:
+      return undefined;
+  }
+}
+
+function isBackNavigationKey(event: KeyboardEvent) {
+  return event.key === "Escape"
+    || event.key === "Backspace"
+    || event.key === "BrowserBack"
+    || event.key === "Back"
+    || event.key === "GoBack"
+    || event.keyCode === 8
+    || event.keyCode === 27
+    || event.keyCode === 461;
+}
+
+function moveSpatialFocus(direction: SpatialDirection) {
+  const focusableItems = getSpatialFocusableItems();
+  if (focusableItems.length === 0) {
+    return false;
+  }
+
+  const current = document.activeElement instanceof HTMLElement
+    && focusableItems.includes(document.activeElement)
+    ? document.activeElement
+    : undefined;
+
+  if (!current) {
+    focusSpatialItem(focusableItems[0]);
+    return true;
+  }
+
+  const currentRect = current.getBoundingClientRect();
+  const currentCenter = getRectCenter(currentRect);
+  const candidates = focusableItems
+    .filter((item) => item !== current)
+    .map((item) => {
+      const rect = item.getBoundingClientRect();
+      const center = getRectCenter(rect);
+      const dx = center.x - currentCenter.x;
+      const dy = center.y - currentCenter.y;
+      return { item, rect, center, dx, dy };
+    })
+    .filter((candidate) => isSpatialCandidate(direction, currentRect, candidate.rect, candidate.dx, candidate.dy))
+    .map((candidate) => ({
+      item: candidate.item,
+      score: getSpatialScore(direction, candidate.dx, candidate.dy),
+    }))
+    .sort((left, right) => left.score - right.score);
+
+  if (candidates.length === 0) {
+    const fallback = getDirectionalFallbackItem(direction, focusableItems, current);
+    if (!fallback) {
+      return false;
+    }
+
+    focusSpatialItem(fallback);
+    return true;
+  }
+
+  focusSpatialItem(candidates[0].item);
+  return true;
+}
+
+function focusFirstSpatialItem({ forcePreferred }: { forcePreferred: boolean }) {
+  const preferred = getPreferredInitialFocusItem();
+  if (forcePreferred && preferred) {
+    focusSpatialItem(preferred);
+    return;
+  }
+
+  if (document.activeElement instanceof HTMLElement
+      && document.activeElement !== document.body
+      && document.activeElement !== document.documentElement
+      && isElementVisible(document.activeElement)) {
+    return;
+  }
+
+  const first = preferred ?? getSpatialFocusableItems()[0];
+  if (first) {
+    focusSpatialItem(first);
+  }
+}
+
+function getPreferredInitialFocusItem() {
+  for (const selector of [
+    ".resume-dialog .play-button",
+    ".movie-detail .play-button",
+    ".series-detail .detail-back",
+    ".poster-card",
+    ".category-button.active",
+    ".dashboard-card",
+    ".icon-text-button",
+  ]) {
+    const item = Array
+      .from(document.querySelectorAll<HTMLElement>(selector))
+      .find((element) => !element.hasAttribute("disabled") && isElementVisible(element));
+    if (item) {
+      return item;
+    }
+  }
+
+  return undefined;
+}
+
+function getDirectionalFallbackItem(
+  direction: SpatialDirection,
+  focusableItems: HTMLElement[],
+  current: HTMLElement,
+) {
+  const items = focusableItems.filter((item) => item !== current);
+  if (items.length === 0) {
+    return undefined;
+  }
+
+  if (direction === "down" || direction === "right") {
+    return items[0];
+  }
+
+  return items[items.length - 1];
+}
+
+function getSpatialFocusableItems() {
+  return Array.from(document.querySelectorAll<HTMLElement>(spatialFocusableSelector))
+    .filter((item) => !item.hasAttribute("disabled") && isElementVisible(item));
+}
+
+function isElementVisible(element: HTMLElement) {
+  const style = window.getComputedStyle(element);
+  return style.visibility !== "hidden"
+    && style.display !== "none"
+    && element.getClientRects().length > 0;
+}
+
+function focusSpatialItem(element: HTMLElement) {
+  element.focus({ preventScroll: true });
+  element.scrollIntoView({ block: "nearest", inline: "nearest" });
+}
+
+function getRectCenter(rect: DOMRect) {
+  return {
+    x: rect.left + (rect.width / 2),
+    y: rect.top + (rect.height / 2),
+  };
+}
+
+function isSpatialCandidate(
+  direction: SpatialDirection,
+  currentRect: DOMRect,
+  candidateRect: DOMRect,
+  dx: number,
+  dy: number,
+) {
+  const tolerance = 8;
+  switch (direction) {
+    case "up":
+      return candidateRect.bottom <= currentRect.top + tolerance || dy < -tolerance;
+    case "down":
+      return candidateRect.top >= currentRect.bottom - tolerance || dy > tolerance;
+    case "left":
+      return candidateRect.right <= currentRect.left + tolerance || dx < -tolerance;
+    case "right":
+      return candidateRect.left >= currentRect.right - tolerance || dx > tolerance;
+  }
+}
+
+function getSpatialScore(direction: SpatialDirection, dx: number, dy: number) {
+  const primary = direction === "left" || direction === "right" ? Math.abs(dx) : Math.abs(dy);
+  const secondary = direction === "left" || direction === "right" ? Math.abs(dy) : Math.abs(dx);
+  return primary + (secondary * 2);
 }
 
 function parseDurationSeconds(value: string) {

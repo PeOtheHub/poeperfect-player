@@ -523,6 +523,89 @@ label.file-button:focus-within {
   font-weight: 700;
 }
 
+body.webos-tv button:focus,
+body.webos-tv input:focus,
+body.webos-tv select:focus,
+body.webos-tv label.file-button:focus-within {
+  border-color: #67e8f9;
+  box-shadow:
+    0 0 0 4px rgba(56, 189, 248, 0.24),
+    0 0 30px rgba(56, 189, 248, 0.34);
+}
+
+body.webos-tv .loading-panel {
+  padding: 30px;
+}
+
+body.webos-tv .dashboard-center {
+  gap: 44px;
+}
+
+body.webos-tv .dashboard-title h1 {
+  font-size: 48px;
+}
+
+body.webos-tv .dashboard-title p {
+  margin-top: 12px;
+  font-size: 20px;
+}
+
+body.webos-tv .dashboard-grid {
+  grid-template-columns: repeat(3, minmax(300px, 390px));
+  gap: 34px;
+}
+
+body.webos-tv .dashboard-card {
+  min-height: 410px;
+  padding: 38px 28px 34px;
+}
+
+body.webos-tv .dashboard-card:focus,
+body.webos-tv .dashboard-card:focus-visible {
+  transform: translateY(-6px) scale(1.02);
+  border-color: #f8fafc;
+  filter: brightness(1.1);
+  box-shadow:
+    0 0 0 5px rgba(56, 189, 248, 0.42),
+    0 28px 60px rgba(0, 0, 0, 0.45);
+}
+
+body.webos-tv .dashboard-card-icon {
+  justify-self: center;
+  width: 168px;
+  height: 168px;
+  margin-right: auto;
+  margin-left: auto;
+  border-width: 4px;
+  border-color: rgba(255, 255, 255, 0.86);
+  border-radius: 34px;
+}
+
+body.webos-tv .dashboard-card-icon svg {
+  display: block;
+  margin: auto;
+}
+
+body.webos-tv .dashboard-card strong {
+  margin-top: 34px;
+  font-size: 44px;
+}
+
+body.webos-tv .dashboard-card small {
+  order: -1;
+  margin-top: 0;
+  margin-bottom: 26px;
+  min-width: 190px;
+  padding: 7px 16px;
+  font-size: 17px;
+}
+
+body.webos-tv .dashboard-card span {
+  margin-top: 16px;
+  font-size: 18px;
+  font-weight: 850;
+}
+
 .dashboard-footer {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -881,6 +964,91 @@ label.file-button:focus-within {
   color: #07111f;
 }
 
+body.webos-tv .category-list {
+  gap: 8px;
+  padding: 4px 8px 4px 3px;
+}
+
+body.webos-tv .category-button {
+  position: relative;
+  grid-template-columns: minmax(0, 1fr) 72px;
+  min-height: 58px;
+  border-width: 2px;
+  border-color: rgba(59, 130, 246, 0.16);
+  transition:
+    transform 120ms ease,
+    border-color 120ms ease,
+    background 120ms ease,
+    box-shadow 120ms ease;
+}
+
+body.webos-tv .category-button::before {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 0;
+  content: "";
+  background: #fef08a;
+  box-shadow: 0 0 22px rgba(250, 204, 21, 0);
+  transition:
+    width 120ms ease,
+    box-shadow 120ms ease;
+}
+
+body.webos-tv .category-button span {
+  position: relative;
+  z-index: 1;
+  padding: 0 14px 0 16px;
+}
+
+body.webos-tv .category-button small {
+  position: relative;
+  z-index: 1;
+}
+
+body.webos-tv .category-button:focus {
+  border-color: #67e8f9;
+  background: linear-gradient(90deg, rgba(14, 116, 144, 0.92), rgba(37, 99, 235, 0.86));
+  transform: translateX(4px);
+}
+
+body.webos-tv .category-button.active {
+  min-height: 64px;
+  background: linear-gradient(90deg, #fef3c7, #facc15 66%, #f97316);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.7),
+    0 0 0 3px rgba(250, 204, 21, 0.32),
+    0 14px 30px rgba(0, 0, 0, 0.38),
+    0 0 30px rgba(250, 204, 21, 0.28);
+  transform: translateX(6px);
+}
+
+body.webos-tv .category-button.active::before {
+  width: 9px;
+  box-shadow: 0 0 28px rgba(250, 204, 21, 0.82);
+}
+
+body.webos-tv .category-button.active:focus,
+body.webos-tv .category-button.active:focus-visible {
+  border-color: #ffffff;
+  box-shadow:
+    0 0 0 4px rgba(255, 255, 255, 0.5),
+    0 0 0 8px rgba(250, 204, 21, 0.36),
+    0 18px 34px rgba(0, 0, 0, 0.42);
+  transform: translateX(8px) scale(1.01);
+}
+
+body.webos-tv .category-button.active span {
+  font-size: 15px;
+  font-weight: 950;
+}
+
+body.webos-tv .category-button.active small {
+  background: rgba(15, 23, 42, 0.82);
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 950;
+}
+
 .content-surface {
   display: grid;
   grid-template-rows: auto 1fr;
@@ -927,6 +1095,23 @@ label.file-button:focus-within {
   background: transparent;
 }
 
+.poster-region {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  min-height: 0;
+  gap: 10px;
+}
+
+.poster-region > .loading-inline {
+  justify-content: center;
+  min-height: 56px;
+  padding: 10px 16px;
+  border: 1px solid #164e63;
+  border-radius: 14px;
+  background: rgba(8, 47, 73, 0.72);
+  text-align: center;
+}
+
 .poster-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(158px, 1fr));
@@ -935,6 +1120,10 @@ label.file-button:focus-within {
   min-height: 0;
   overflow: auto;
   padding: 4px 8px 18px 4px;
+}
+
+.poster-grid.is-updating {
+  opacity: 0.62;
 }
 
 .poster-card {
@@ -951,6 +1140,19 @@ label.file-button:focus-within {
 .poster-card:hover,
 .poster-card:focus-visible {
   transform: translateY(-2px);
+}
+
+body.webos-tv .poster-card:focus,
+body.webos-tv .poster-card:focus-visible {
+  transform: translateY(-5px) scale(1.015);
+}
+
+body.webos-tv .poster-card:focus .poster-art,
+body.webos-tv .poster-card:focus-visible .poster-art {
+  border-color: #f8fafc;
+  box-shadow:
+    0 0 0 5px rgba(56, 189, 248, 0.38),
+    0 18px 40px rgba(0, 0, 0, 0.44);
 }
 
 .poster-art {
